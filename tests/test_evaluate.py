@@ -31,6 +31,17 @@ def test_score_run_counts_missed_extra_wrong(scene):
     assert score_run(partial, truth_label(truth))['missed'] == [3]
 
 
+def test_uncertain_label_counts_presence_only(scene):
+    _, truth, res = scene()
+    label = truth_label(truth, drop=(2,))
+    label['dots'][4] = [0.0, 0.0]                             # positions not to be trusted
+    label['uncertain'] = True
+    row = score_run(res, label)
+    assert row['uncertain'] and row['extra'] == [2]
+    assert row['dot_err_px'] == {} and row['wrong'] == [] and 'origin_err_mm' not in row
+    assert summarize({'R': row})['with_dots']['uncertain'] == 1
+
+
 def test_no_dots_label(scene):
     _, _, res = scene(missing=(0, 1, 2, 3, 4))
     assert score_run(res, {'no_dots': True}) == {'confidence': 'refused', 'no_dots': True}
@@ -60,5 +71,5 @@ def test_summarize_and_cli(tmp_path, scene, capsys):
     assert 'runs: 2' in text and 'FALSE POSE 1' in text      # RUN_B has dots after all
     s = json.loads(out.read_text())['summary']
     assert s == summarize(json.loads(out.read_text())['runs'])
-    assert s['with_dots'] == {'n': 1, 'clean': 1, 'degraded': 0, 'refused': 0}
+    assert s['with_dots'] == {'n': 1, 'clean': 1, 'degraded': 0, 'refused': 0, 'uncertain': 0}
     assert s['dots']['found'] == 5 and s['dots']['wrong'] == 0

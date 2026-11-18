@@ -108,6 +108,8 @@ def test_annotation_holder_and_note():
     assert a.label() == {'dots': [None] * 5, 'holder': [[0, 0], [1, 1], [2, 2], [3, 3]],
                          'note': 'glare'}
     assert a.no_dots()['no_dots'] is True and 'dots' not in a.no_dots()
+    a.uncertain = True
+    assert a.label()['uncertain'] is True and Annotation(a.label()).uncertain
 
 
 def test_labels_file(tmp_path):

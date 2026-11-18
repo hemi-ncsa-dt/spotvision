@@ -41,6 +41,6 @@ def test_coverage(summary):
 def test_accuracy(summary):
     o, a, d = (summary['pose']['origin_err_mm'], summary['pose']['angle_err_deg'],
                summary['dots']['err_px'])
-    assert o['median'] < 0.06 and o['p90'] < 0.1 and o['max'] < 0.45
+    assert o['median'] < 0.06 and o['p90'] < 0.08 and o['max'] < 0.15
     assert a['median'] < 0.05 and a['p90'] < 0.4 and a['max'] < 2.2
-    assert d['median'] < 0.7 and d['p90'] < 2.2
+    assert d['median'] < 0.7 and d['p90'] < 1.3

@@ -266,11 +266,11 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 | labelled "no dots" (62): refused / false pose | 62 / 0 | 62 / 0 |
 | labelled with dots (29): pose (clean) | 18 (0) | 22 (8) |
 | wrong or extra dots in runs with a pose | 3 / 2 | 0 / 0 |
-| pose origin error, median / p90 / max | 0.25 / 0.51 / 0.78 mm | 0.04 / 0.07 / 0.40 mm |
+| pose origin error, median / p90 / max | 0.25 / 0.51 / 0.78 mm | 0.04 / 0.06 / 0.10 mm |
 | pose angle error, median / p90 / max | 0.39 / 1.16 / 1.54° | 0.03 / 0.31 / 2.03° |
-| dot error, median / p90 | 0.72 / 8.4 px | 0.57 / 1.9 px |
+| dot error, median / p90 | 0.72 / 8.4 px | 0.55 / 1.1 px |
 
-* Pose errors compare the detector's L-frame with one fitted to the labelled dots. The largest are a badly defocused image (0.40 mm; the label is hard to place there too) and a degraded run whose Y-arm dots are barely visible (2.03°).
+* Pose errors compare the detector's L-frame with one fitted to the labelled dots. One badly defocused run (TEST_0000_0_1_2026-10-19_10-32-49) is labelled `uncertain` and counts for coverage only. The largest angle error is a degraded run whose Y-arm dots are barely visible (2.03°).
 * The 7 refused runs with dots have them under glare or at a contrast the disc NCC cannot separate from texture; 2 of them have only 2 visible dots, too few for a pose anyway.
 * The same circle-fit bias affected some clean runs in v0.3.1: APLMAA00001-001 and -002 (dots near the window edge) moved by 0.41 and 0.26 mm, onto the dot centres. The other 123 clean runs moved by at most 0.011 mm (p95).
 * Most refusals have no visible dots: dark JHBMAI samples, round JHACRA samples, rock-textured JHAMAL00020 samples, and dots washed out by glare.
@@ -312,7 +312,7 @@ Inputs are expanded like `spotvision`'s: a directory without `raw.png` stands fo
 
 **Placing a dot accurately:** press and hold. A magnifier opens on the point with a circle of the nominal dot size and a crosshair; drag until the circle sits on the dot's edge all round, then release. Pressing on a placed dot picks it up again (it moves with the cursor without jumping to it). The arrow keys nudge the selected dot by 0.25 px (Shift: 1 px) with the magnifier shown, and the mouse wheel changes the circle radius to match the dots in front of you (it carries over to the next runs). Positions are stored to 0.01 px in `raw.png` pixel-centre coordinates (the convention the detector uses).
 
-The detector's dots are shown as dashed orange `d0`–`d4` circles for reference; `a` copies them as a starting point (`u` removes dots from the end so they can be re-clicked). Other keys: `u` undo, `c` cycle contrast (stretch / CLAHE / raw, helps on dark or washed-out images), `f` full image, `h` click the 4 plate corners starting at the chamfer corner (only when the yellow holder box is wrong), `t` note, `Esc` close the magnifier, `s` skip, `b` back, `q` quit. `--size` caps the image size on screen.
+The detector's dots are shown as dashed orange `d0`–`d4` circles for reference; `a` copies them as a starting point (`u` removes dots from the end so they can be re-clicked). Other keys: `u` undo, `c` cycle contrast (stretch / CLAHE / raw, helps on dark or washed-out images), `f` full image, `h` click the 4 plate corners starting at the chamfer corner (only when the yellow holder box is wrong), `t` note, `k` uncertain (dots too blurred to place), `Esc` close the magnifier, `s` skip, `b` back, `q` quit. `--size` caps the image size on screen.
 
 **`labels.json`** is rewritten after every saved run, one run per line, with coordinates in full-resolution `raw.png` px (x, y):
 
@@ -323,7 +323,7 @@ The detector's dots are shown as dashed orange `d0`–`d4` circles for reference
 }
 ```
 
-Optional keys: `holder` (4 corners) and `note`.
+Optional keys: `holder` (4 corners), `note`, and `uncertain` (`k`: the dots are visible but too blurred to place; the run then counts for coverage, not for position errors).
 
 ## Evaluating against labels
 
@@ -336,6 +336,7 @@ For each labelled run it runs the detector and compares:
 
 * **"no dots" labels:** should be refused; anything else is a **false pose**.
 * **dots:** in runs with a pose, each detected dot's distance from its label (px), plus *missed* (labelled, not detected), *extra* (detected, labelled not visible) and *wrong* (more than half a dot radius from its label).
+* **uncertain labels** count for coverage and missed / extra dots only.
 * **pose:** an L-frame fitted to the labelled dots (same fit as the detector's, seeded with the holder axes) against the detector's: origin distance in mm and X-axis angle in degrees. This counts a run whose pose is right even if a dot was missed.
 
 `--json FILE` writes the summary and per-run rows. `tests/test_labels.py` runs the same evaluation on `tests/data/labels.json` and fails if the results get worse than the current ones.

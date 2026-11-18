@@ -3,7 +3,8 @@
 Per run: a label of "no dots" should be refused; a label with dots should get a pose whose
 dots match the labelled ones. Poses are compared as L-frames fitted to the labelled dots
 (origin in mm, X-axis angle in degrees), so a dot the detector missed still counts if the
-pose it found is right.
+pose it found is right. A label marked ``"uncertain": true`` (dots visible but too blurred
+to place) still counts for coverage and missed / extra dots, not for position errors.
 """
 import argparse
 import json
@@ -41,6 +42,7 @@ def score_run(res, label):
     row = {'confidence': res.confidence, 'no_dots': bool(label.get('no_dots'))}
     if row['no_dots']:
         return row
+    row['uncertain'] = bool(label.get('uncertain'))
     ppm = res.holder_px_per_mm
     lab = label['dots']
     det = res.dots_px or [None] * 5
@@ -53,6 +55,9 @@ def score_run(res, label):
         missed=[i for i in range(5) if lab[i] is not None and det[i] is None],
         extra=[i for i in range(5) if lab[i] is None and det[i] is not None],
         wrong=[i for i, e in err.items() if R and e > WRONG_DOT_R * R])
+    if row['uncertain']:                         # positions not trusted: presence only
+        row['dot_err_px'], row['wrong'] = {}, []
+        return row
     if res.sample_frame_px and res.holder_mm_to_px:
         fr = label_frame(lab, res.holder_mm_to_px)
         if fr is not None:
@@ -105,7 +110,8 @@ def summarize(rows):
                     'false_pose': sum(r['confidence'] != 'refused' for r in nd)},
         'with_dots': {'n': len(wd), 'clean': sum(r['confidence'] == 'clean' for r in wd),
                       'degraded': sum(r['confidence'] == 'degraded' for r in wd),
-                      'refused': len(wd) - len(posed)},
+                      'refused': len(wd) - len(posed),
+                      'uncertain': sum(r.get('uncertain', False) for r in wd)},
         'dots': {'labelled': sum(r['n_label'] for r in posed),
                  'found': sum(len(r['dot_err_px']) for r in posed),
                  'missed': sum(len(r['missed']) for r in posed),
@@ -128,7 +134,8 @@ def report(rows, verbose=False):
              f"labelled no dots: {s['no_dots']['n']}: refused {s['no_dots']['refused']}, "
              f"FALSE POSE {s['no_dots']['false_pose']}",
              f"labelled with dots: {s['with_dots']['n']}: clean {s['with_dots']['clean']}, "
-             f"degraded {s['with_dots']['degraded']}, refused {s['with_dots']['refused']}",
+             f"degraded {s['with_dots']['degraded']}, refused {s['with_dots']['refused']}"
+             f" ({s['with_dots']['uncertain']} uncertain: no position errors)",
              f"dots in runs with a pose: labelled {s['dots']['labelled']}, "
              f"found {s['dots']['found']}, "
              f"missed {s['dots']['missed']}, extra {s['dots']['extra']}, "
@@ -143,7 +150,8 @@ def report(rows, verbose=False):
                 flag = '' if r['confidence'] == 'refused' else '  FALSE POSE'
                 lines.append(f"{n[:60]:60s} no dots  {r['confidence']}{flag}")
                 continue
-            errs = ' '.join(f'{i}:{e:.1f}' for i, e in sorted(r['dot_err_px'].items()))
+            errs = ('uncertain' if r.get('uncertain') else
+                    ' '.join(f'{i}:{e:.1f}' for i, e in sorted(r['dot_err_px'].items())))
             pose = (f" origin {r['origin_err_mm']:.2f}mm angle {r['angle_err_deg']:+.2f}deg"
                     if 'origin_err_mm' in r else '')
             lines.append(f"{n[:60]:60s} {r['n_label']} dots {r['confidence']:8s} "

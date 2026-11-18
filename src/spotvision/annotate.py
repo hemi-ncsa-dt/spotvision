@@ -5,7 +5,8 @@ Labels go to one JSON file keyed by run name, one run per line:
   "<run>": {"dots": [[x, y] or null, ...5]}   dot centres in raw.png px, template order
   "<run>": {"no_dots": true}                  no dot visible to a human either
 
-optionally with "holder" (the 4 plate corners, starting at the chamfer corner) and "note".
+optionally with "holder" (the 4 plate corners, starting at the chamfer corner), "note", and
+"uncertain": true when the dots are visible but too blurred to place reliably.
 The file is rewritten after every saved run, so quitting never loses work.
 """
 import argparse
@@ -41,7 +42,7 @@ HELP = '\n'.join(f'{k:<9}{v}' for k, v in (
     ('arrows', f'nudge {NUDGE_PX} px (Shift {NUDGE_FAST_PX:g})'), ('wheel', 'circle size'),
     ('x, right', 'not visible'), ('u', 'undo'), ('a', 'accept detector'),
     ('n', 'no dots visible'), ('h', 'holder corners'), ('f', 'full image / window'),
-    ('c', 'contrast'), ('t', 'note'), ('Esc', 'hide magnifier'), ('Enter', 'save, next'),
+    ('c', 'contrast'), ('t', 'note'), ('k', 'uncertain (too blurred)'), ('Esc', 'hide magnifier'), ('Enter', 'save, next'),
     ('s', 'skip'), ('b', 'back'), ('q', 'quit')))
 
 
@@ -134,6 +135,7 @@ class Annotation:
         self.dots = list(label.get('dots', []))
         self.holder = list(label.get('holder', []))
         self.note = label.get('note')
+        self.uncertain = bool(label.get('uncertain'))
         self.holder_mode = False
 
     def click(self, pt):
@@ -206,6 +208,8 @@ class Annotation:
         if self.holder_mode or len(self.dots) < 5:
             return None
         out = {'dots': self.dots}
+        if self.uncertain:
+            out['uncertain'] = True
         if len(self.holder) == 4:
             out['holder'] = self.holder
         if self.note:
@@ -373,7 +377,8 @@ class App:
         lines = [f'detector: {self.res.confidence}  ({reasons})', f'saved: {saved}',
                  f'labelled dots: [{dots}]   view: {"full" if self.full else "window"}, '
                  f'contrast: {CONTRASTS[self.contrast]}   circle r: {self.circle_r():.1f} px'
-                 + (f'   note: {self.ann.note}' if self.ann.note else ''),
+                 + (f'   note: {self.ann.note}' if self.ann.note else '')
+                 + ('   UNCERTAIN' if self.ann.uncertain else ''),
                  f'>> {self.ann.prompt()}' + (f'   ({self.message})' if self.message else '')]
         self.status.config(text='\n'.join(lines))
 
@@ -502,6 +507,9 @@ class App:
         elif k == 'c':
             self.contrast = (self.contrast + 1) % len(CONTRASTS)
             self.set_view()
+        elif k == 'k':
+            self.ann.uncertain = not self.ann.uncertain
+            self.draw()
         elif k == 't':
             from tkinter import simpledialog
             note = simpledialog.askstring('note', f'note for {self.name}',
