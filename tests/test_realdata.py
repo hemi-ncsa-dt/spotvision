@@ -58,8 +58,8 @@ def test_refused_runs(run):
     assert res.holder_corners is not None
 
 
-def test_glare_run_degraded_with_four_dots():
-    # camera reflection over the dots; dot 1 is missed, the other four are right
+def test_glare_run_finds_all_dots():
+    # camera reflection over the dots; all five are visible to a human (tests/data/labels)
     res = analyze(load('APLMAA00001-008_6ac8ed6b6ed7698c1288dc37_0_2239_2026-11-02_16-05-02'))
-    assert res.confidence == 'degraded'
-    assert [d is not None for d in res.dots_px] == [True, False, True, True, True]
+    assert res.confidence != 'refused'
+    assert all(d is not None for d in res.dots_px)

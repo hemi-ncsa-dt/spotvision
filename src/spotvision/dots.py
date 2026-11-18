@@ -9,6 +9,7 @@ from .geometry import inside_quad, px_to_holder, similarity_fit, subpixel_peak
 # template (X, Y) mm is fitted as (Y, X) so that an unrotated sample maps with the
 # holder's +Y image direction as rotation angle and keeps the holder's handedness
 _TMPL_YX = C.DOT_TEMPLATE[:, ::-1]
+DOT_POLARITIES = ('dark', 'bright', 'mixed')     # mixed: |gradient|, for half-glared dots
 
 
 def dot_candidates(img, win, R, max_n=C.DOT_MAX_CANDIDATES):
@@ -88,25 +89,34 @@ def fit_template(cands, scores, tmpl, ppm, R, win, exp_ang, corner_ok, scale_tol
     return out
 
 
-def refine_dot(img, c, R, polarity, n_rays=48):
+def refine_dot(img, c, R, polarity, n_rays=48, win=None, inset=0.0):
     """Sub-pixel circle fit to the radial edge around c (two passes, trimmed Kasa fit).
 
-    polarity 'bright' / 'dark' uses the signed edge, anything else |gradient|.
+    polarity 'bright' / 'dark' uses the signed edge, anything else |gradient|. Each ray
+    takes the edge that is strongest after weighting by a prior around the current radius
+    estimate (nominal R, then the first fit), so a stronger edge further out (window edge,
+    glare halo) does not win. With win, ray samples less than inset px inside it are ignored.
     Returns (center, radius, edge inlier fraction) or None."""
     ang = np.linspace(0, 2 * np.pi, n_rays, endpoint=False)
     dirs = np.stack([np.cos(ang), np.sin(ang)], 1)
     c = np.asarray(c, float)
     step = 0.5                                       # px along each ray
+    rad = R
     for _ in range(2):
         rs = np.arange(C.DOT_RAY_RANGE_R[0] * R, C.DOT_RAY_RANGE_R[1] * R, step)
         xy = c[None, None] + rs[None, :, None] * dirs[:, None]
         prof = ndi.map_coordinates(img, [xy[..., 1], xy[..., 0]], order=1, mode='nearest')
         g = np.gradient(prof, axis=1)
         g = {'bright': -g, 'dark': g}.get(polarity, np.abs(g))
-        j = np.clip(g.argmax(1), 1, len(rs) - 2)
+        if win is not None:
+            g = np.where(inside_quad(win, xy, inset), g, 0.0)
+        prior = np.exp(-0.5 * ((rs - rad) / (C.DOT_EDGE_PRIOR_R * R)) ** 2)
+        j = np.clip((g * prior).argmax(1), 1, len(rs) - 2)
         sub, peak = subpixel_peak(g, j)
         rr = rs[j] + step * sub
-        good = peak > C.DOT_EDGE_MIN_PEAK * np.median(peak) + 1e-6
+        if not (peak > 0).any():
+            return None
+        good = (peak > 0) & (peak > C.DOT_EDGE_MIN_PEAK * np.median(peak[peak > 0]))
         P = c + rr[:, None] * dirs
         keep = good.copy()
         for _ in range(3):
@@ -190,10 +200,33 @@ def _determined(found):
     return nx >= 1 and ny >= 1 and nx + ny >= 4
 
 
-def _accept(img, r, R, pol, ncc, found, i, win):
-    ncc[i] = dot_ncc(img, r[0], r[1], pol, win, C.DOT_NCC_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R)
-    if ncc[i] >= C.DOT_WEAK_NCC and r[2] >= C.DOT_WEAK_FRAC:
-        found[i] = r[0]
+def _inset(R):
+    """DOT_WINDOW_INSET_MM in px (R is the nominal dot radius in px)."""
+    return C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+
+
+def _verify(img, start, pred, R, win, max_shift):
+    """The best reading of the dot predicted at pred, refined from start, over the
+    polarities: (center, radius, edge fraction, ncc, polarity) or None. Each dot gets its
+    own polarity because glare can flip some dots of one sample and not others."""
+    best = None
+    for pol in DOT_POLARITIES:
+        r = refine_dot(img, start, R, pol, win=win, inset=_inset(R))
+        if r is None or np.linalg.norm(r[0] - pred) > max_shift:
+            continue
+        v = dot_ncc(img, r[0], r[1], pol, win, _inset(R))
+        if best is None or v > best[3]:
+            best = (*r, v, pol)
+    return best
+
+
+def _accept(v, i, found, ncc, pols, min_ncc=C.DOT_WEAK_NCC):
+    """Record the NCC of reading v of dot i; keep the dot if it is at least weak."""
+    if v is None:
+        return
+    center, _, frac, ncc[i], pols[i] = v
+    if ncc[i] >= min_ncc and frac >= C.DOT_WEAK_FRAC:
+        found[i] = center
 
 
 def _best_hypothesis(img, cands, ppm, R, win, exp_ang, corner_ok):
@@ -204,18 +237,26 @@ def _best_hypothesis(img, cands, ppm, R, win, exp_ang, corner_ok):
         for _, Rm, t, match in fit_template(pts, sc / (sc.max() + 1e-9), _TMPL_YX, ppm, R,
                                             win, exp_ang, corner_ok):
             pred = (Rm @ _TMPL_YX.T).T + t
-            found, ncc = [None] * 5, [None] * 5
+            found, ncc, pols = [None] * 5, [None] * 5, [None] * 5
             for i, p in enumerate(pred):
-                r = refine_dot(img, pts[match[i]] if match[i] >= 0 else p, R, pol)
-                if r is not None and np.linalg.norm(r[0] - p) <= C.DOT_MAX_SHIFT_R * R:
-                    _accept(img, r, R, pol, ncc, found, i, win)
+                start = pts[match[i]] if match[i] >= 0 else p
+                _accept(_verify(img, start, p, R, win, C.DOT_MAX_SHIFT_R * R),
+                        i, found, ncc, pols)
             acc = [v for v, f in zip(ncc, found) if f is not None]
             n_strong = sum(v >= C.DOT_STRONG_NCC for v in acc)
             if n_strong < 1 or (n_strong < C.MIN_STRONG and len(acc) < C.MIN_TOTAL_IF_WEAK):
                 continue
             if best is None or sum(acc) > best[0]:
-                best = (sum(acc), Rm, t, pol, found, ncc)
+                best = (sum(acc), Rm, t, found, ncc, pols)
     return best
+
+
+def _frame_offset(f, i, o, ex, ey):
+    """How far dot i at f is from where the L-frame (o, ex, ey) allows it: across its arm,
+    or from the origin for the corner dot."""
+    if i == 0:
+        return float(np.linalg.norm(f - o))
+    return float(abs((f - o) @ (ey if i in C.X_ARM else ex)))
 
 
 def _dots_list(found):
@@ -241,8 +282,7 @@ def find_dots(img, win, holder, res):
     if best is None:
         res.reasons.append('dots: no hypothesis with enough dot evidence')
         return None
-    _, Rm, t, pol, found, ncc = best
-    res.dot_polarity = pol
+    _, Rm, t, found, ncc, pols = best
     res.dots_ncc = [None if v is None else round(v, 2) for v in ncc]
     ex0, ey0 = Rm @ _TMPL_YX[3], Rm @ _TMPL_YX[1]           # template axes in px
     ex0, ey0 = ex0 / np.linalg.norm(ex0), ey0 / np.linalg.norm(ey0)
@@ -253,7 +293,19 @@ def find_dots(img, win, holder, res):
         res.reasons.append(f'dots: only {res.n_dots} of 5 resolved, pose underdetermined')
         return None
 
-    # guided pass: weaker dots accepted where the fitted frame predicts them
+    # guided pass. When the strong dots fix the L-frame on their own (one per arm, three
+    # constraints), every other dot is searched for again where that frame predicts it and
+    # a weak one is kept only if it lies on the frame: weak dots of the hypothesis may be
+    # texture. Otherwise the frame of all dots found so far predicts the missing ones.
+    strong = [f if f is not None and ncc[i] >= C.DOT_STRONG_NCC else None
+              for i, f in enumerate(found)]
+    nx, ny = _arm_counts(strong)
+    anchored = nx >= 1 and ny >= 1 and nx + ny >= 3
+    if anchored:
+        for i in range(5):
+            if strong[i] is None and found[i] is not None:
+                found[i] = None
+                ncc[i] = pols[i] = None
     o, ex, ey, _ = fit_l_frame(found, ex0, ey0, t)
     far = [(np.linalg.norm(found[i] - o), np.linalg.norm(C.DOT_TEMPLATE[i]))
            for i in (2, 4, 1, 3) if found[i] is not None]
@@ -261,10 +313,25 @@ def find_dots(img, win, holder, res):
     for i in range(5):
         if found[i] is None:
             p = o + s_ppm * (C.DOT_TEMPLATE[i, 0] * ex + C.DOT_TEMPLATE[i, 1] * ey)
-            r = refine_dot(img, p, R, pol)
-            if r is not None and np.linalg.norm(r[0] - p) <= C.DOT_GUIDED_MAX_SHIFT_R * R:
-                _accept(img, r, R, pol, ncc, found, i, win)
+            _accept(_verify(img, p, p, R, win, C.DOT_GUIDED_MAX_SHIFT_R * R),
+                    i, found, ncc, pols, C.DOT_GUIDED_WEAK_NCC)
+            if anchored and found[i] is not None and ncc[i] < C.DOT_STRONG_NCC:
+                off = _frame_offset(found[i], i, o, ex, ey)
+                if off > C.DOT_WEAK_MAX_OFF_PX:
+                    found[i] = None
+                    res.reasons.append(f'dots: dropped weak dot {i} ({off:.1f} px off the '
+                                       f'strong dots\' frame)')
     res.dots_ncc = [None if v is None else round(v, 2) for v in ncc]
+
+    # a weak corner dot must lie on the frame of the other dots: spacings are measured
+    # from it, so a wrong corner would get good dots dropped below
+    others = [None] + found[1:]
+    if found[0] is not None and ncc[0] < C.DOT_STRONG_NCC and _determined(others):
+        off = _frame_offset(found[0], 0, *fit_l_frame(others, ex0, ey0, o)[:3])
+        if off > C.DOT_WEAK_MAX_OFF_PX:
+            found[0] = None
+            res.reasons.append(f'dots: dropped weak dot 0 ({off:.1f} px off the other '
+                               f'dots\' frame)')
 
     # prune: dots off nominal spacing, then dots far off their arm line
     while True:
@@ -299,6 +366,8 @@ def find_dots(img, win, holder, res):
         res.reasons.append(f'dots: L-frame RMS {res.dots_rms_px:.2f} px > {C.MAX_RMS_PX}, no pose')
         return None
 
+    used = {pols[i] for i, f in enumerate(found) if f is not None}
+    res.dot_polarity = used.pop() if len(used) == 1 else 'mixed'
     _describe(res, found, ncc, o, ex, ey, ppm)
     return o, ex, ey
 

@@ -33,12 +33,26 @@ def test_refine_dot_subpixel(level, pol):
     assert frac > 0.9
 
 
-def test_wrong_size_discs_are_not_dots():
-    small = disc_image([(150, 120)], r=0.4 * R)
-    assert refine_dot(small, np.array([150.0, 120.0]), R, 'bright') is None
-    big = disc_image([(150, 120)], r=2.2 * R)                 # rays only see the flat interior
-    out = refine_dot(big, np.array([150.0, 120.0]), R, 'bright')
-    assert out is None or dot_ncc(big, out[0], out[1], 'bright') < C.DOT_WEAK_NCC
+@pytest.mark.parametrize('r', [0.4 * R, 2.2 * R])
+def test_wrong_size_discs_are_not_dots(r):
+    # the radius prior makes the circle fit look near the nominal radius, so a wrong-size
+    # disc may still give a circle there; the disc NCC then rejects it
+    img = disc_image([(150, 120)], r=r)
+    out = refine_dot(img, np.array([150.0, 120.0]), R, 'bright')
+    assert out is None or dot_ncc(img, out[0], out[1], 'bright') < C.DOT_WEAK_NCC
+
+
+def test_refine_dot_ignores_stronger_edge_outside_window():
+    # faint dot 2.0 mm from a strong window edge: without the window the edge pulls the
+    # circle ~1 px
+    c = np.array([150.0, 150.0])
+    img = disc_image([c], level=125, bg=110, shape=(300, 300), noise=1.0)
+    edge = c[0] - 2.0 / C.DOT_RADIUS_MM * R
+    img[:, :int(edge) + 6] = 0.0
+    win = np.array([[edge, 0], [299, 0], [299, 299], [edge, 299]])
+    inset = C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+    out = refine_dot(img, c + [3, 2], R, 'bright', win=win, inset=inset)
+    assert out is not None and np.linalg.norm(out[0] - c) < 0.4 and abs(out[1] - R) < 1.0
 
 
 def test_dot_ncc_polarity_and_noise():
@@ -114,6 +128,6 @@ def test_dot_ncc_ignores_window_edge():
     img[:, :int(edge) + 6] = 25 / 255
     img[:, int(edge) + 6:int(edge) + 10] = 160 / 255
     win = np.array([[edge, 0], [299, 0], [299, 299], [edge, 299]])
-    inset = C.DOT_NCC_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+    inset = C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
     assert dot_ncc(img, c, R, 'dark') < C.DOT_STRONG_NCC
     assert dot_ncc(img, c, R, 'dark', win, inset) > 0.9

@@ -53,6 +53,8 @@ DOT_GUIDED_MAX_SHIFT_R = 0.4              # same, in the guided pass (frame alre
 # sub-pixel circle refinement
 DOT_RAY_RANGE_R = (0.4, 1.7)              # radial edge search along each ray
 DOT_EDGE_MIN_PEAK = 0.25                  # ray edge kept if gradient > this * median peak
+DOT_EDGE_PRIOR_R = 0.15                   # ray edge weighted by a Gaussian of this sigma
+                                          # around the radius estimate (nominal, then fitted)
 DOT_FIT_TRIM_PX, DOT_FIT_TRIM_FACTOR = 1.5, 2.5  # circle-fit inliers: resid < max(px, f * median)
 DOT_MIN_EDGE_FRAC = 0.5                   # rays on the fitted circle, else no dot
 DOT_RADIUS_RANGE = (0.65, 1.5)            # accepted fitted radius relative to nominal
@@ -63,8 +65,11 @@ DOT_NCC_MIN_RING_FRAC = 0.25              # of that ring left after masking, els
 DOT_STRONG_NCC = 0.7                      # random texture: p95 ~0.45, max ~0.78
 DOT_WEAK_NCC, DOT_WEAK_FRAC = 0.45, 0.6   # weak dots only count via geometric consensus:
 MIN_STRONG, MIN_TOTAL_IF_WEAK = 2, 4      # need >=2 strong dots, or >=4 dots (>=1 strong)
+DOT_GUIDED_WEAK_NCC = 0.5                 # weak dot found by searching at a predicted spot,
+                                          # where geometry no longer vouches for it
+DOT_WEAK_MAX_OFF_PX = 1.5                 # weak dot vs. the strong dots' frame, when they fix it
 SPACING_TOL = (0.0, 0.12, 0.08, 0.12, 0.08)  # per dot, fraction of nominal distance from corner
-DOT_NCC_WINDOW_INSET_MM = 0.8             # NCC ignores the window-edge gap + bevel (~0.65 mm)
+DOT_WINDOW_INSET_MM = 0.8                 # circle fit + NCC ignore the window-edge gap + bevel
 DOT_DROP_RESIDUAL_PX = 3.0                # a dot this far off its arm line is dropped
 MAX_RMS_PX = 3.0                          # L-frame residual beyond this -> no pose
 

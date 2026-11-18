@@ -38,10 +38,12 @@ def test_clean_scene_full_accuracy(scene):
     np.testing.assert_allclose(res.arm_spacing_mm, [0, 10, 20, 6, 12], atol=0.03)
 
 
-@pytest.mark.parametrize('holder_deg,sample_deg', [(1.5, 0.0), (-2.5, 1.0), (180.0, -3.0),
-                                                   (0.0, 8.0)])
-def test_rotations(scene, holder_deg, sample_deg):
-    _, truth, res = scene(holder_deg=holder_deg, sample_deg=sample_deg)
+# at 8 deg the far Y dot rises 2.8 mm: the corner sits lower so that it stays in the window
+@pytest.mark.parametrize('holder_deg,sample_deg,corner_mm', [
+    (1.5, 0.0, (3.2, 3.2)), (-2.5, 1.0, (3.2, 3.2)), (180.0, -3.0, (3.2, 3.2)),
+    (0.0, 8.0, (4.5, 3.2))])
+def test_rotations(scene, holder_deg, sample_deg, corner_mm):
+    _, truth, res = scene(holder_deg=holder_deg, sample_deg=sample_deg, corner_mm=corner_mm)
     assert res.confidence == CLEAN
     assert_holder(res, truth)
     assert_pose(res, truth)

@@ -108,7 +108,7 @@ image (x right, y down), holder upright:
 
 ```json
 {
-  "algorithm_version": "spotvision-0.3.1",
+  "algorithm_version": "spotvision-0.4.0",
   "matrix": [[0.99680, 0.01313], [-0.01313, 0.99680]],
   "rms_error_mm": 0.0036,
   "translation": [2.502, 3.073]
@@ -169,15 +169,15 @@ The window is machined into the holder, so it is **placed** from the holder pose
    * scale within 12 % of the holder px/mm;
    * rotation within ±20° of the holder axes;
    * all five dots inside the window, allowing up to ¼ radius under the lip;
-   * the corner dot within ±2 mm of (3.2, 3.2) mm from the window's top-left corner (measured on 125 clean runs: 1.75–4.3 mm).
+   * the corner dot within ±2 mm of (3.2, 3.2) mm from the window's top-left corner (measured on 125 clean runs: 1.75–4.3 mm; labelled corner dots: 2.0–3.9 mm).
 
    Hypotheses are scored mainly by the number of matched dots. The top 10 per polarity are kept, with non-maximum suppression.
-3. **Verification:** each predicted dot is refined by a sub-pixel circle fit (48 radial edge rays, trimmed Kasa fit, radius within 0.65–1.5 × nominal). It is then scored by its **disc NCC**: the normalised cross-correlation of the patch with an ideal disc, after removing a planar background estimated from a surrounding ring (1.2–1.7 × the radius). This score does not depend on contrast or illumination gradients. Only sample surface is used: pixels within 0.8 mm of the window edge are masked out, because the dark gap and bright bevel there would otherwise corrupt the background of dots that sit close to the edge. On this data, random texture scores ≤ 0.45 (95th percentile) and real dots score 0.7–0.97.
+3. **Verification:** each predicted dot is refined by a sub-pixel circle fit: 48 radial edge rays, trimmed Kasa fit, radius within 0.65–1.5 × nominal. On each ray the edge is weighted by a Gaussian prior (σ = 0.15 radius) around the current radius estimate (nominal, then the first fit), and ray samples within 0.8 mm of the window edge are ignored. Without both, a stronger edge just outside the dot (the window gap, a glare halo) pulled the circle 4–10 px on about a fifth of the labelled dots. Each dot is fitted as dark, bright and `mixed` (|gradient|, for half-glared dots), and the reading with the best NCC is kept, because glare can flip some dots of a sample and not others. It is then scored by its **disc NCC**: the normalised cross-correlation of the patch with an ideal disc, after removing a planar background estimated from a surrounding ring (1.2–1.7 × the radius). This score does not depend on contrast or illumination gradients. Only sample surface is used: pixels within 0.8 mm of the window edge are masked out, because the dark gap and bright bevel there would otherwise corrupt the background of dots that sit close to the edge. On this data, random texture scores ≤ 0.45 (95th percentile) and real dots score 0.7–0.97.
    * A dot is **strong** if NCC ≥ 0.7, and **weak** if NCC ≥ 0.45 with ≥ 60 % of its edge rays on the circle.
    * A hypothesis needs **≥ 1 strong dot**, and either ≥ 2 strong dots or ≥ 4 dots in total. Weak dots therefore count only through geometric consensus.
    * Of the hypotheses that qualify, the one with the highest summed NCC wins.
 4. **L-frame fit:** the origin and one angle, with the two arms orthogonal by construction. It minimises each dot's perpendicular distance to its own arm line. Spacing along the arms is deliberately free, because some samples are etched with the middle +Y dot at about 9.3 mm instead of 10.
-5. **Guided pass:** missing dots are searched for where the fitted frame predicts them (within 0.4 radius), using the sample-plane scale.
+5. **Guided pass:** when the strong dots fix the L-frame on their own (a dot on each arm, three equations), every other dot is searched for again where that frame predicts it (within 0.4 radius, using the sample-plane scale), and a weak dot is kept only if it lies within 1.5 px of the frame. Otherwise only the missing dots are searched for, from the frame of all dots found. A weak dot found this way needs NCC ≥ 0.5 rather than 0.45: the search starts at the predicted spot, and the circle fit can trace a dot-sized circle in texture there. A weak corner dot must also lie within 1.5 px of the frame of the other dots, because a wrong corner would make good dots fail the spacing check.
 6. **Pruning:** a dot whose distance from the corner is off nominal (beyond 12 % for the middle dots, 8 % for the far dots) is dropped first. Then any dot more than 3 px off its arm line is dropped. If the pose becomes underdetermined, there is no pose.
 7. **Final checks:** the fitted corner must still satisfy the corner prior, and the RMS must be ≤ 3 px.
 
@@ -225,13 +225,15 @@ Every nominal and threshold lives in `src/spotvision/constants.py`, with a comme
 | `DOT_TEMPLATE`, `DOT_RADIUS_MM` | 6/12 mm and 10/20 mm arms, r = 1.5 mm | dot pattern |
 | `CORNER_DOT_IN_WINDOW_MM`, `CORNER_DOT_TOL_MM` | (3.2, 3.2), ±2 mm | where the corner dot may be |
 | `MAX_SAMPLE_ROT_DEG` | 20° | sample rotation prior |
-| `DOT_STRONG_NCC`, `DOT_WEAK_NCC` | 0.7, 0.45 | dot evidence; lowering these trades false refusals for false poses |
-| `DOT_NCC_WINDOW_INSET_MM` | 0.8 mm | window-edge band excluded from the dot NCC |
+| `DOT_STRONG_NCC`, `DOT_WEAK_NCC`, `DOT_GUIDED_WEAK_NCC` | 0.7, 0.45, 0.5 | dot evidence; lowering these trades false refusals for false poses |
+| `DOT_WEAK_MAX_OFF_PX` | 1.5 px | how far a weak dot may sit off the frame of the strong (or, for the corner, the other) dots |
+| `DOT_EDGE_PRIOR_R` | 0.15 | width of the radius prior in the circle fit, in dot radii |
+| `DOT_WINDOW_INSET_MM` | 0.8 mm | window-edge band ignored by the circle fit and the NCC |
 | `MIN_STRONG`, `MIN_TOTAL_IF_WEAK` | 2, 4 | consensus rule |
 | `SPACING_TOL` | 0 / 12 % / 8 % | allowed along-arm deviation per dot |
 | `CLEAN_RMS_PX`, `CLEAN_PERP_DEG`, `MAX_RMS_PX` | 1.0 px, 0.5°, 3.0 px | clean vs. degraded vs. refused |
 
-The thresholds were tuned by eye on the 216 captured runs. Re-check them against a labelled set before relying on them for new sample families.
+The thresholds were tuned on the 216 captured runs, the dot-level ones against the hand labels (`spotvision-evaluate`). Label a few runs of a new sample family and evaluate before relying on them there.
 
 ---
 
@@ -250,16 +252,30 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 
 | | count |
 |---|---|
-| clean | 125 |
-| degraded | 18 |
-| refused | 73 |
+| clean | 133 |
+| degraded | 14 |
+| refused | 69 |
 
 * The holder was found in 213 of 216 runs.
-* Speed is about 0.4 s per image on one core; all 216 take about 21 s with `-j 8`.
-* All 143 poses were inspected on contact sheets. Every clean pose looked correct. No hand-labelled ground truth exists yet.
+* Speed is about 0.4 s per image on one core; all 216 take about 22 s with `-j 8`.
+
+**Hand labels** (`tests/data/labels.json`: every run that was not clean in v0.3.1, labelled with `spotvision-annotate`; `spotvision-evaluate tests/data/labels.json -j 8`):
+
+| | v0.3.1 | now |
+|---|---|---|
+| labelled "no dots" (62): refused / false pose | 62 / 0 | 62 / 0 |
+| labelled with dots (29): pose (clean) | 18 (0) | 22 (8) |
+| wrong or extra dots in runs with a pose | 3 / 2 | 0 / 0 |
+| pose origin error, median / p90 / max | 0.25 / 0.51 / 0.78 mm | 0.04 / 0.07 / 0.40 mm |
+| pose angle error, median / p90 / max | 0.39 / 1.16 / 1.54° | 0.03 / 0.31 / 2.03° |
+| dot error, median / p90 | 0.72 / 8.4 px | 0.57 / 1.9 px |
+
+* Pose errors compare the detector's L-frame with one fitted to the labelled dots. The largest are a badly defocused image (0.40 mm; the label is hard to place there too) and a degraded run whose Y-arm dots are barely visible (2.03°).
+* The 7 refused runs with dots have them under glare or at a contrast the disc NCC cannot separate from texture; 2 of them have only 2 visible dots, too few for a pose anyway.
+* The same circle-fit bias affected some clean runs in v0.3.1: APLMAA00001-001 and -002 (dots near the window edge) moved by 0.41 and 0.26 mm, onto the dot centres. The other 123 clean runs moved by at most 0.011 mm (p95).
 * Most refusals have no visible dots: dark JHBMAI samples, round JHACRA samples, rock-textured JHAMAL00020 samples, and dots washed out by glare.
 
-**Comparison with the old COORD pipeline.** This is a cross-check, not ground truth.
+**Comparison with the old COORD pipeline** (measured with v0.3.1). This is a cross-check, not ground truth.
 
 * **Both clean (61 runs):** they agree within 0.11 mm, 0.16° and 0.003 in scale.
 * **Better here, clean (17 runs):**
@@ -269,7 +285,6 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 * **Old pose wrong, refused here:** 39 runs of COORD "degraded" poses on rock texture, dotless or glare images.
 * **Same pose, clean here instead of degraded:** 46 runs. These are the uneven-middle-dot samples (COORD residual ≈ 3.8 px).
 * **Refused here, but COORD's pose looks right:** 1 run (TEST_0000_0_1_2026-11-03_15-17-16), with glare.
-* **Degraded here, but the pose is correct:** runs where a visible dot is missed or scores just under NCC 0.7, mostly under glare (e.g. APLMAA00001-008, TEST20).
 
 ## Limitations
 
@@ -310,22 +325,39 @@ The detector's dots are shown as dashed orange `d0`–`d4` circles for reference
 
 Optional keys: `holder` (4 corners) and `note`.
 
+## Evaluating against labels
+
+```bash
+spotvision-evaluate tests/data/labels.json -j 8          # summary
+spotvision-evaluate labels.json --root /data/runs -v     # one line per run
+```
+
+For each labelled run it runs the detector and compares:
+
+* **"no dots" labels:** should be refused; anything else is a **false pose**.
+* **dots:** in runs with a pose, each detected dot's distance from its label (px), plus *missed* (labelled, not detected), *extra* (detected, labelled not visible) and *wrong* (more than half a dot radius from its label).
+* **pose:** an L-frame fitted to the labelled dots (same fit as the detector's, seeded with the holder axes) against the detector's: origin distance in mm and X-axis angle in degrees. This counts a run whose pose is right even if a dot was missed.
+
+`--json FILE` writes the summary and per-run rows. `tests/test_labels.py` runs the same evaluation on `tests/data/labels.json` and fails if the results get worse than the current ones.
+
 ---
 
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 70 tests, ~10 s
+.venv/bin/python -m pytest -q            # 81 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
 | test file | covers |
 |---|---|
 | `test_geometry.py` | similarity fit, robust line, intersection, quad containment, frame conversions, sub-pixel peak |
-| `test_dots.py` | circle refinement accuracy (both polarities), disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
+| `test_dots.py` | circle refinement accuracy (both polarities), window edge ignored by the fit, wrong-size discs, disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
 | `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
 | `test_outputs.py` | COORD key sets for metadata, diagnostics and transform; acquisition whitelist; `write_run`; CLI end-to-end, parallel, no overlay, unreadable input, input expansion |
 | `test_annotate.py` | annotation tool without the GUI: pixel-centre view mapping, rendering, sub-pixel magnifier, press / drag / nudge, labels file |
+| `test_evaluate.py` | evaluation scoring on synthetic scenes: perfect labels, missed / extra / wrong dots, label frame, CLI |
+| `test_labels.py` | the detector against `tests/data/labels.json` (no false poses, no wrong dots, coverage, accuracy bounds); skipped when the run folders are absent |
 | `test_realdata.py` | regression on captured runs; skipped when the run folders are absent |
 
 **Layout:**
@@ -343,5 +375,7 @@ src/spotvision/
   metadata.py    metadata.json / transform.json, write_run()
   cli.py         command line
   annotate.py    spotvision-annotate (Tk click tool)
+  evaluate.py    spotvision-evaluate (scores against labels)
 tests/           pytest suite + synthetic scene renderer (synth.py)
+tests/data/      labels.json (hand labels)
 ```
