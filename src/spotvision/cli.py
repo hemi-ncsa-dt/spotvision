@@ -43,7 +43,7 @@ def expand_inputs(paths):
     return out
 
 
-def process(path, out_root, overlay_scale=0.5):
+def process(path, out_root, overlay_scale=0.5, include_detection=True):
     """Analyze one input and write its outputs. Returns a summary dict."""
     image, name, meta = resolve_input(path)
     im = cv2.imread(image, cv2.IMREAD_UNCHANGED)
@@ -56,7 +56,8 @@ def process(path, out_root, overlay_scale=0.5):
     if meta:
         with open(meta, encoding='utf-8') as f:
             acquisition = json.load(f)
-    write_run(os.path.join(out_root, name), im, res, elapsed, acquisition, overlay_scale)
+    write_run(os.path.join(out_root, name), im, res, elapsed, acquisition, overlay_scale,
+              include_detection)
     return {'name': name, 'elapsed_s': elapsed, 'confidence': res.confidence,
             'n_dots': res.n_dots, 'rms_px': res.dots_rms_px, 'reasons': res.reasons}
 
@@ -81,6 +82,8 @@ def main(argv=None):
     ap.add_argument('-j', '--jobs', type=int, default=1, help='parallel worker processes')
     ap.add_argument('--overlay-scale', type=float, default=0.5,
                     help='overlay downscale factor; 0 disables the overlay')
+    ap.add_argument('--no-detection', dest='detection', action='store_false',
+                    help="leave the full Result ('detection') out of metadata.json")
     ap.add_argument('-q', '--quiet', action='store_true', help='only print the summary')
     ap.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     args = ap.parse_args(argv)
@@ -92,7 +95,8 @@ def main(argv=None):
         # spawn: forking a process that already runs OpenCV/BLAS threads can deadlock
         with ProcessPoolExecutor(args.jobs, mp_context=multiprocessing.get_context('spawn')) as ex:
             results = ex.map(process, args.inputs, [args.out] * len(args.inputs),
-                             [args.overlay_scale] * len(args.inputs))
+                             [args.overlay_scale] * len(args.inputs),
+                             [args.detection] * len(args.inputs))
             summaries = []
             for s in results:
                 summaries.append(s)
@@ -101,7 +105,7 @@ def main(argv=None):
     else:
         summaries = []
         for path in args.inputs:
-            s = process(path, args.out, args.overlay_scale)
+            s = process(path, args.out, args.overlay_scale, args.detection)
             summaries.append(s)
             if not args.quiet:
                 print(_line(s), flush=True)

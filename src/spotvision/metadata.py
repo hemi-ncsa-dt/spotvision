@@ -1,5 +1,6 @@
 """COORD-compatible ``metadata.json`` / ``transform.json`` and run-directory output."""
 import json
+import math
 import os
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -47,45 +48,58 @@ def diagnostics(res):
     }
 
 
-def build_metadata(res, im, elapsed_s, acquisition=None):
-    """metadata.json in the COORD layout, with the full ``Result`` under 'detection'."""
+def to_jsonable(value):
+    """Plain-Python copy of value that is valid strict JSON: numpy scalars and arrays become
+    Python numbers and lists, tuples become lists, and NaN/inf become None."""
+    if isinstance(value, dict):
+        return {str(k): to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [to_jsonable(v) for v in value]
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def build_metadata(res, im, elapsed_s, acquisition=None, include_detection=True):
+    """metadata.json in the COORD layout, as strict-JSON plain Python.
+
+    ``timestamp`` and the other acquisition keys appear only when ``acquisition`` (the input
+    run's metadata.json) provides them; ``processed_at`` is always the processing time.
+    ``include_detection=False`` leaves out the full ``Result`` ('detection')."""
     acq = {k: v for k, v in (acquisition or {}).items() if k in ACQUISITION_KEYS}
-    acq.setdefault('timestamp', datetime.now(timezone.utc).isoformat())
-    return {
+    meta = {
         **acq,
         'algorithm_version': ALGORITHM_VERSION,
         'confidence': res.confidence,
-        'detection': asdict(res),
         'diagnostics': diagnostics(res),
         'elapsed_s': round(elapsed_s, 3),
         'image': {'dtype': str(im.dtype), 'shape': list(im.shape)},
+        'processed_at': datetime.now(timezone.utc).isoformat(),
         'reasons': list(res.reasons),
         'sample_window_origin_in_detected_holder_mm': [C.WINDOW_X0, C.WINDOW_Y0],
         'transform': res.transform,
     }
-
-
-def _json_default(v):
-    if isinstance(v, np.ndarray):
-        return v.tolist()
-    if isinstance(v, np.generic):
-        return v.item()
-    raise TypeError(f'{type(v).__name__} is not JSON serializable')
+    if include_detection:
+        meta['detection'] = asdict(res)
+    return to_jsonable(meta)
 
 
 def write_json(path, value):
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump(value, f, indent=2, sort_keys=True, default=_json_default)
+        json.dump(to_jsonable(value), f, indent=2, sort_keys=True, allow_nan=False)
         f.write('\n')
 
 
-def write_run(out_dir, im, res, elapsed_s, acquisition=None, overlay_scale=0.5):
+def write_run(out_dir, im, res, elapsed_s, acquisition=None, overlay_scale=0.5,
+              include_detection=True):
     """Write overlay.png (unless overlay_scale is None), metadata.json and, when there is a
     pose, transform.json into out_dir."""
     os.makedirs(out_dir, exist_ok=True)
     if overlay_scale:
         cv2.imwrite(os.path.join(out_dir, 'overlay.png'), draw(im, res, overlay_scale))
     write_json(os.path.join(out_dir, 'metadata.json'),
-               build_metadata(res, im, elapsed_s, acquisition))
+               build_metadata(res, im, elapsed_s, acquisition, include_detection))
     if res.transform is not None:
         write_json(os.path.join(out_dir, 'transform.json'), res.transform)

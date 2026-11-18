@@ -48,6 +48,7 @@ spotvision -o results frame_0001.png --overlay-scale 0     # no overlay
 | `-o/--out` | output root; each input writes to `OUT/<run name>/` |
 | `-j/--jobs N` | parallel worker processes (default 1) |
 | `--overlay-scale F` | overlay downscale factor, default `0.5`; `0` disables the overlay |
+| `--no-detection` | leave the full `Result` (`detection`) out of `metadata.json` |
 | `-q/--quiet` | print only the final summary |
 
 One line is printed per run (`name  time  confidence  dots  rms  reasons`), then a summary such as `summary: clean 117, degraded 18, refused 81`. The exit code is 1 if any input could not be read. `python -m spotvision` is equivalent.
@@ -107,7 +108,7 @@ image (x right, y down), holder upright:
 
 ```json
 {
-  "algorithm_version": "spotvision-0.2.0",
+  "algorithm_version": "spotvision-0.3.0",
   "matrix": [[0.99680, 0.01313], [-0.01313, 0.99680]],
   "rms_error_mm": 0.0036,
   "translation": [2.502, 3.073]
@@ -124,13 +125,23 @@ image (x right, y down), holder upright:
 
 | key | source |
 |---|---|
-| `camera_model`, `camera_settings`, `instruction_no`, `run_id`, `sample_id`, `sample_igsn`, `timestamp` | copied from the input run's `metadata.json` if present; these are capture facts, and any old detection results in that file are ignored. Without it, `timestamp` is the processing time. |
-| `algorithm_version`, `elapsed_s`, `image {dtype, shape}` | this run |
+| `camera_model`, `camera_settings`, `instruction_no`, `run_id`, `sample_id`, `sample_igsn`, `timestamp` | copied from the input run's `metadata.json` if present; these are capture facts, and any old detection results in that file are ignored. Keys the input doesn't have are left out (`timestamp` is never invented). |
+| `algorithm_version`, `elapsed_s`, `processed_at`, `image {dtype, shape}` | this run (`processed_at`: UTC ISO 8601 processing time) |
 | `confidence`, `reasons` | see [confidence](#confidence-and-reasons) |
 | `sample_window_origin_in_detected_holder_mm` | `[15.0, 62.5]` |
 | `transform` | as above, `null` when refused |
 | `diagnostics` | COORD's keys: `calibrated` (always false), `chamfer_confidence`, `dot_candidates`, `dot_polarity`, `holder_angle_deg`, `holder_aspect`, `holder_det`, `holder_long_px`, `holder_short_px`, `holder_px_per_mm`, `px_per_mm`, `px_per_mm_source` (`holder_edge`), `mirrored_rms_px`, `n_dots`, `perpendicularity_deg`, `plane_scale_ratio`, `relative_det`, `sample_det`, `sample_rms_px`; plus `holder_fit_rms_px`, `similarity_rms_px`, `window_groove_offset_mm` |
-| `detection` | the full `Result`: every pixel coordinate, per-dot NCC, arm spacings, the holder mm→px matrix, the sample frame in px, … |
+| `detection` | the full `Result`: every pixel coordinate, per-dot NCC, arm spacings, the holder mm→px matrix, the sample frame in px, … Left out with `--no-detection` / `include_detection=False`. |
+
+Both files are strict JSON: values that are not finite (e.g. `sample_rms_px` when fewer than three dots are found) are written as `null`, never `NaN`. `build_metadata()` returns the same thing as plain Python (no numpy types), so it can go straight to an API such as Girder's item metadata:
+
+```python
+from spotvision import analyze, build_metadata
+meta = build_metadata(analyze(im), im, elapsed_s, acquisition, include_detection=False)
+gc.addMetadataToItem(item_id, meta)
+```
+
+`to_jsonable(value)` does the same conversion for any other value (e.g. `Result.transform`).
 
 COORD's `photo_only` mode is not reproduced: every image is measured.
 
@@ -271,7 +282,7 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 52 tests, ~10 s
+.venv/bin/python -m pytest -q            # 55 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
