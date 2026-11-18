@@ -35,7 +35,7 @@ def test_posed_runs_have_no_wrong_or_extra_dots(summary):
 
 def test_coverage(summary):
     wd = summary['with_dots']
-    assert wd['n'] - wd['refused'] >= 22 and wd['clean'] >= 8
+    assert wd['n'] - wd['refused'] >= 22 and wd['clean'] >= 7      # 10-32-49: out of focus
 
 
 def test_accuracy(summary):

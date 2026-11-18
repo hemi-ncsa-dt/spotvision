@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from spotvision import constants as C
-from spotvision.dots import dot_candidates, dot_ncc, fit_l_frame, refine_dot
+from spotvision.dots import dot_candidates, dot_ncc, edge_blur, fit_l_frame, refine_dot
 
 R = 23.0
 
@@ -131,3 +131,20 @@ def test_dot_ncc_ignores_window_edge():
     inset = C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
     assert dot_ncc(img, c, R, 'dark') < C.DOT_STRONG_NCC
     assert dot_ncc(img, c, R, 'dark', win, inset) > 0.9
+
+
+@pytest.mark.parametrize('sigma', [2.0, 3.0, 5.0])
+def test_edge_blur_measures_gaussian_sigma(sigma):
+    img = disc_image([(150, 150)], shape=(300, 300), noise=1.0)      # already blurred by 1
+    img = cv2.GaussianBlur(img, (0, 0), np.sqrt(sigma ** 2 - 1.0))
+    assert abs(edge_blur(img, (150.0, 150.0), R) - sigma) < 0.2
+
+
+def test_edge_blur_ignores_rays_leaving_the_window():
+    c = np.array([150.0, 150.0])
+    img = disc_image([c], shape=(300, 300), noise=1.0)
+    edge = c[0] - 2.2 / C.DOT_RADIUS_MM * R
+    img[:, :int(edge) + 6] = 0.0                                     # window gap
+    win = np.array([[edge, 0], [299, 0], [299, 299], [edge, 299]])
+    inset = C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+    assert abs(edge_blur(img, c, R, win, inset) - 1.17) < 0.2      # same as without the gap

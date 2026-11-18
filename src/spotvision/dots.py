@@ -259,6 +259,31 @@ def _frame_offset(f, i, o, ex, ey):
     return float(abs((f - o) @ (ey if i in C.X_ARM else ex)))
 
 
+def edge_blur(img, c, R, win=None, inset=0.0, n_rays=64):
+    """Blur of a dot's edge as the sigma (px) of a Gaussian-blurred step, or None.
+
+    From the median radial profile around centre c: a step of contrast k blurred by sigma
+    has a steepest slope of k / (sigma * sqrt(2 pi)). Rays whose outer part leaves the
+    window (inset px inside win) are not used. img should not be smoothed beforehand."""
+    step = 0.25
+    ang = np.linspace(0, 2 * np.pi, n_rays, endpoint=False)
+    dirs = np.stack([np.cos(ang), np.sin(ang)], 1)
+    rs = np.arange(0, C.DOT_RAY_RANGE_R[1] * R, step)
+    xy = np.asarray(c, float)[None, None] + rs[None, :, None] * dirs[:, None]
+    prof = ndi.map_coordinates(img, [xy[..., 1], xy[..., 0]], order=1, mode='nearest')
+    inner, outer = rs < 0.5 * R, rs > 1.35 * R
+    keep = np.ones(n_rays, bool) if win is None else inside_quad(win, xy[:, outer], inset).all(1)
+    if keep.sum() < n_rays // 4:
+        return None
+    p = np.median(prof[keep], 0)
+    contrast = np.median(p[outer]) - np.median(p[inner])
+    slope = np.gradient(ndi.gaussian_filter1d(p, 1.0), step) * np.sign(contrast)
+    peak = slope[~inner & ~outer].max()
+    if peak <= 0 or abs(contrast) < 1e-3:
+        return None
+    return float(abs(contrast) / (peak * np.sqrt(2 * np.pi)))
+
+
 def _dots_list(found):
     return [None if f is None else f.tolist() for f in found]
 

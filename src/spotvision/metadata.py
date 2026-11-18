@@ -26,6 +26,7 @@ def diagnostics(res):
         'calibrated': False,
         'chamfer_confidence': res.chamfer_contrast,
         'dot_candidates': res.dot_candidates,
+        'dot_edge_blur_px': res.dot_edge_blur_px,
         'dot_polarity': res.dot_polarity,
         'holder_angle_deg': res.holder_angle_deg,
         'holder_aspect': res.holder_long_px / res.holder_short_px if res.holder_short_px else None,

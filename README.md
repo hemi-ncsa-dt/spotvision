@@ -108,7 +108,7 @@ image (x right, y down), holder upright:
 
 ```json
 {
-  "algorithm_version": "spotvision-0.4.0",
+  "algorithm_version": "spotvision-0.4.1",
   "matrix": [[0.99680, 0.01313], [-0.01313, 0.99680]],
   "rms_error_mm": 0.0036,
   "translation": [2.502, 3.073]
@@ -130,7 +130,7 @@ image (x right, y down), holder upright:
 | `confidence`, `reasons` | see [confidence](#confidence-and-reasons) |
 | `sample_window_origin_in_detected_holder_mm` | `[15.0, 62.5]` |
 | `transform` | as above, `null` when refused |
-| `diagnostics` | COORD's keys: `calibrated` (always false), `chamfer_confidence`, `dot_candidates`, `dot_polarity`, `holder_angle_deg`, `holder_aspect`, `holder_det`, `holder_long_px`, `holder_short_px`, `holder_px_per_mm`, `px_per_mm`, `px_per_mm_source` (`holder_edge`), `mirrored_rms_px`, `n_dots`, `perpendicularity_deg`, `plane_scale_ratio`, `relative_det`, `sample_det`, `sample_rms_px`; plus `holder_fit_rms_px`, `similarity_rms_px`, `window_groove_offset_mm` |
+| `diagnostics` | COORD's keys: `calibrated` (always false), `chamfer_confidence`, `dot_candidates`, `dot_polarity`, `holder_angle_deg`, `holder_aspect`, `holder_det`, `holder_long_px`, `holder_short_px`, `holder_px_per_mm`, `px_per_mm`, `px_per_mm_source` (`holder_edge`), `mirrored_rms_px`, `n_dots`, `perpendicularity_deg`, `plane_scale_ratio`, `relative_det`, `sample_det`, `sample_rms_px`; plus `dot_edge_blur_px`, `holder_fit_rms_px`, `similarity_rms_px`, `window_groove_offset_mm` |
 | `detection` | the full `Result`: every pixel coordinate, per-dot NCC, arm spacings, the holder mm→px matrix, the sample frame in px, … Left out with `--no-detection` / `include_detection=False`. |
 
 Both files are strict JSON: values that are not finite (e.g. `sample_rms_px` when fewer than three dots are found) are written as `null`, never `NaN`. `build_metadata()` returns the same thing as plain Python (no numpy types), so it can go straight to an API such as Girder's item metadata:
@@ -187,6 +187,8 @@ The pose needs at least one dot on each arm and at least 4 arm equations: for ex
 
 The sample frame in pixels is mapped into holder mm through the holder pose. This produces the transform, `sample_origin_holder_mm` and `sample_angle_deg`.
 
+**Focus check:** on the unsmoothed image, the median radial profile across each found dot gives its edge blur: a step of contrast *k* blurred by a Gaussian of σ has a steepest slope of *k* / (σ√2π). The median σ over the dots is `dot_edge_blur_px`. In-focus runs measure 0.5–1.3 px (median 0.8); a focus sweep in the captured runs measures 1.7–5 px. Above 1.5 px the run is degraded, not refused: the dot centres are still measured (to about 0.01 mm on synthetic scenes), but the image is not one to trust as clean.
+
 ## Confidence and reasons
 
 | confidence | meaning |
@@ -213,6 +215,7 @@ The sample frame in pixels is mapped into holder mm through the holder pose. Thi
 * `dots: arms … deg off perpendicular` (> 0.5°; only measured with ≥ 2 dots on each arm)
 * `holder: chamfer ambiguous (contrast …)` (< 0.25)
 * `holder: edges deviate from a 120x70 mm rectangle (rms … px)` (> 3 px)
+* `image out of focus: dot edge blur … px > 1.5`
 
 ## Tuning
 
@@ -231,6 +234,7 @@ Every nominal and threshold lives in `src/spotvision/constants.py`, with a comme
 | `DOT_WINDOW_INSET_MM` | 0.8 mm | window-edge band ignored by the circle fit and the NCC |
 | `MIN_STRONG`, `MIN_TOTAL_IF_WEAK` | 2, 4 | consensus rule |
 | `SPACING_TOL` | 0 / 12 % / 8 % | allowed along-arm deviation per dot |
+| `DOT_EDGE_MAX_BLUR_PX` | 1.5 px | dot-edge blur above which a run is degraded (out of focus) |
 | `CLEAN_RMS_PX`, `CLEAN_PERP_DEG`, `MAX_RMS_PX` | 1.0 px, 0.5°, 3.0 px | clean vs. degraded vs. refused |
 
 The thresholds were tuned on the 216 captured runs, the dot-level ones against the hand labels (`spotvision-evaluate`). Label a few runs of a new sample family and evaluate before relying on them there.
@@ -252,8 +256,8 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 
 | | count |
 |---|---|
-| clean | 133 |
-| degraded | 14 |
+| clean | 126 |
+| degraded | 21 |
 | refused | 69 |
 
 * The holder was found in 213 of 216 runs.
@@ -264,7 +268,7 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 | | v0.3.1 | now |
 |---|---|---|
 | labelled "no dots" (62): refused / false pose | 62 / 0 | 62 / 0 |
-| labelled with dots (29): pose (clean) | 18 (0) | 22 (8) |
+| labelled with dots (29): pose (clean) | 18 (0) | 22 (7) |
 | wrong or extra dots in runs with a pose | 3 / 2 | 0 / 0 |
 | pose origin error, median / p90 / max | 0.25 / 0.51 / 0.78 mm | 0.04 / 0.06 / 0.10 mm |
 | pose angle error, median / p90 / max | 0.39 / 1.16 / 1.54° | 0.03 / 0.31 / 2.03° |
@@ -346,15 +350,15 @@ For each labelled run it runs the detector and compares:
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 81 tests, ~10 s
+.venv/bin/python -m pytest -q            # 87 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
 | test file | covers |
 |---|---|
 | `test_geometry.py` | similarity fit, robust line, intersection, quad containment, frame conversions, sub-pixel peak |
-| `test_dots.py` | circle refinement accuracy (both polarities), window edge ignored by the fit, wrong-size discs, disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
-| `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
+| `test_dots.py` | circle refinement accuracy (both polarities), window edge ignored by the fit, wrong-size discs, disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit, edge blur (known sigma, window gap ignored) |
+| `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; out of focus → degraded with the pose kept; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
 | `test_outputs.py` | COORD key sets for metadata, diagnostics and transform; acquisition whitelist; `write_run`; CLI end-to-end, parallel, no overlay, unreadable input, input expansion |
 | `test_annotate.py` | annotation tool without the GUI: pixel-centre view mapping, rendering, sub-pixel magnifier, press / drag / nudge, labels file |
 | `test_evaluate.py` | evaluation scoring on synthetic scenes: perfect labels, missed / extra / wrong dots, label frame, CLI |

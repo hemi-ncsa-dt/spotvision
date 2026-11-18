@@ -49,6 +49,16 @@ def test_rotations(scene, holder_deg, sample_deg, corner_mm):
     assert_pose(res, truth)
 
 
+def test_out_of_focus_is_degraded_with_pose(scene):
+    _, truth, sharp = scene()
+    assert sharp.dot_edge_blur_px < C.DOT_EDGE_MAX_BLUR_PX
+    _, truth, blurred = scene(blur=4.0)
+    assert blurred.confidence == DEGRADED
+    assert any('out of focus' in r for r in blurred.reasons)
+    assert blurred.dot_edge_blur_px > C.DOT_EDGE_MAX_BLUR_PX
+    assert_pose(blurred, truth)                       # the pose itself is still measured
+
+
 def test_holder_frame_follows_chamfer_not_image(scene):
     """Rotating the holder 180 deg moves the origin to the other side of the image."""
     _, _, upright = scene()

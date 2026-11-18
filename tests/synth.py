@@ -31,7 +31,7 @@ def rot(deg):
 
 def render(holder_deg=0.0, sample_deg=0.0, corner_mm=(3.2, 3.2), ppm=15.55,
            polarity='bright', dot_offsets=None, missing=(), distractors=(),
-           sample_level=110.0, noise=3.0, seed=0, shape=(2048, 2448)):
+           sample_level=110.0, noise=3.0, seed=0, shape=(2048, 2448), blur=1.0):
     """Render a scene. Returns (uint8 image, truth dict).
 
     dot_offsets : {dot index: (dX, dY) mm} (or pairs) moves dots, sample frame
@@ -83,7 +83,7 @@ def render(holder_deg=0.0, sample_deg=0.0, corner_mm=(3.2, 3.2), ppm=15.55,
                                                  int(round(R * (1 << SHIFT))), 255, -1,
                                                  cv2.LINE_AA, SHIFT), dot_level)
 
-    canvas = cv2.GaussianBlur(canvas, (0, 0), 1.0)
+    canvas = cv2.GaussianBlur(canvas, (0, 0), blur)               # optics / focus
     canvas += np.random.default_rng(seed).normal(0, noise, shape)
     im = np.clip(np.round(canvas), 0, 255).astype(np.uint8)
     truth = {

@@ -3,8 +3,8 @@ import cv2
 import numpy as np
 
 from . import constants as C
-from .dots import find_dots
-from .geometry import px_to_holder
+from .dots import edge_blur, find_dots
+from .geometry import normalize, px_to_holder
 from .holder import find_holder
 from .result import Result
 from .version import ALGORITHM_VERSION
@@ -32,7 +32,24 @@ def analyze(im):
     frame = find_dots(holder.img, win, holder, res)
     if frame is not None:
         _set_pose(res, holder, *frame)
+        _check_focus(res, im, win, holder.ppm)
     return res
+
+
+def _check_focus(res, im, win, ppm):
+    """Median dot-edge blur on the unsmoothed image; an out-of-focus image is degraded
+    (dot centres stay measurable, but a blurred image is not one to trust as clean)."""
+    R = C.DOT_RADIUS_MM * ppm
+    inset = C.DOT_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+    img = normalize(im)
+    blur = [edge_blur(img, p, R, win, inset) for p in res.dots_px if p is not None]
+    blur = [b for b in blur if b is not None]
+    if not blur:
+        return
+    res.dot_edge_blur_px = float(np.median(blur))
+    if res.dot_edge_blur_px > C.DOT_EDGE_MAX_BLUR_PX:
+        res.reasons.append(f'image out of focus: dot edge blur {res.dot_edge_blur_px:.1f} px '
+                           f'> {C.DOT_EDGE_MAX_BLUR_PX}')
 
 
 def _set_pose(res, holder, o, ex, ey):

@@ -33,6 +33,7 @@ class Result:
     n_dots: int = 0
     dots_rms_px: float = None        # perpendicular residual of dots to the fitted L-frame
     perpendicularity_deg: float = None  # free-fit arm angle minus 90 (needs >=2 dots per arm)
+    dot_edge_blur_px: float = None   # median Gaussian sigma of the dot edges (focus)
     arm_spacing_mm: list = None      # distance of each dot from the corner along its arm
     similarity_rms_px: float = None  # dots vs nominal template, best similarity
     mirrored_rms_px: float = None    # same with the opposite handedness (should be far worse)

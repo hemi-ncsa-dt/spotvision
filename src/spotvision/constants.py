@@ -71,6 +71,8 @@ DOT_WEAK_MAX_OFF_PX = 1.5                 # weak dot vs. the strong dots' frame,
 SPACING_TOL = (0.0, 0.12, 0.08, 0.12, 0.08)  # per dot, fraction of nominal distance from corner
 DOT_WINDOW_INSET_MM = 0.8                 # circle fit + NCC ignore the window-edge gap + bevel
 DOT_DROP_RESIDUAL_PX = 3.0                # a dot this far off its arm line is dropped
+DOT_EDGE_MAX_BLUR_PX = 1.5                # Gaussian sigma of the dot edges; in focus <= 1.3
+                                          # (median 0.8), focus sweep 1.7-4.6 -> degraded
 MAX_RMS_PX = 3.0                          # L-frame residual beyond this -> no pose
 
 # ---- confidence --------------------------------------------------------------------
