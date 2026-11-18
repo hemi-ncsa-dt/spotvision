@@ -278,12 +278,42 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 * **Uncalibrated:** px/mm comes from the holder edges. The plate measures 0.17 % off the nominal aspect (about 1.6 px corner residual), and the sample plane differs in scale by up to about 3 %. A calibration target would pin down both, as well as lens distortion.
 * **Thresholds were tuned on this dataset only.** See [Tuning](#tuning).
 
+## Annotating failing runs
+
+`spotvision-annotate` shows each run the detector does not get clean, zoomed on the window, and records where the dots really are. The labels are the ground truth for tuning thresholds and for regression tests.
+
+```bash
+spotvision-annotate /data/runs -o labels.json   # refused + degraded runs not yet labelled
+spotvision-annotate RUN_DIR ... --all           # include clean runs (to measure accuracy)
+spotvision-annotate */ --relabel                # revisit runs that already have a label
+```
+
+Inputs are expanded like `spotvision`'s: a directory without `raw.png` stands for the run directories in it. It needs a display and tkinter (part of Python; on Debian/Ubuntu `apt install python3-tk`). No other dependencies.
+
+**Per run, either:**
+
+* click the 5 dot centres in template order: **0** corner dot, **1, 2** along the wider-spaced (10 mm) arm, **3, 4** along the closer-spaced (6 mm) arm. A dot you can't see: `x` or right-click. A click within a few px of the centre is enough. Then `Enter`.
+* or press `n` if no dot is visible to you either; that confirms a refusal is right.
+
+The detector's dots are shown as dashed orange `d0`–`d4` circles for reference; `a` copies them as a starting point (`u` removes dots from the end so they can be re-clicked). Other keys: `u` undo, `c` cycle contrast (stretch / CLAHE / raw, helps on dark or washed-out images), `f` full image, `h` click the 4 plate corners starting at the chamfer corner (only when the yellow holder box is wrong), `t` note, `s` skip, `b` back, `q` quit. `--size` caps the image size on screen.
+
+**`labels.json`** is rewritten after every saved run, one run per line, with coordinates in full-resolution `raw.png` px (x, y):
+
+```json
+{
+  "APLMAA00001-008_…": {"dots": [[1287.4, 722.9], null, [1596.9, 718.4], [1282.9, 817.1], [1281.4, 909.8]]},
+  "JHBMAI00005-003_…": {"no_dots": true, "note": "dark sample"}
+}
+```
+
+Optional keys: `holder` (4 corners) and `note`.
+
 ---
 
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 57 tests, ~10 s
+.venv/bin/python -m pytest -q            # 67 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
@@ -293,6 +323,7 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 | `test_dots.py` | circle refinement accuracy (both polarities), disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
 | `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
 | `test_outputs.py` | COORD key sets for metadata, diagnostics and transform; acquisition whitelist; `write_run`; CLI end-to-end, parallel, no overlay, unreadable input, input expansion |
+| `test_annotate.py` | annotation tool without the GUI: view mapping, rendering, label building, labels file |
 | `test_realdata.py` | regression on captured runs; skipped when the run folders are absent |
 
 **Layout:**
@@ -309,5 +340,6 @@ src/spotvision/
   overlay.py     draw()
   metadata.py    metadata.json / transform.json, write_run()
   cli.py         command line
+  annotate.py    spotvision-annotate (Tk click tool)
 tests/           pytest suite + synthetic scene renderer (synth.py)
 ```

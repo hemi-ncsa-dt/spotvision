@@ -19,6 +19,7 @@ test = ["pytest>=7"]
 
 [project.scripts]
 spotvision = "spotvision.cli:main"
+spotvision-annotate = "spotvision.annotate:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "spotvision.version.__version__" }
