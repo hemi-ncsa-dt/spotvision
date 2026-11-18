@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 import pytest
 
-from spotvision.annotate import (Annotation, load_labels, make_view, render, runs_to_label,
-                                 save_labels)
+from spotvision.annotate import (Annotation, View, contrast_map, load_labels, loupe, make_view,
+                                 render, runs_to_label, save_labels)
 from spotvision.result import Result
 
 
@@ -18,8 +18,15 @@ def test_view_round_trip_and_window_crop(scene):
     assert view.x0 < win[:, 0].min() and view.x1 > win[:, 0].max()
     assert view.y0 < win[:, 1].min() and view.y1 > win[:, 1].max()
     assert max(view.size) == 800
-    u, v = view.to_view(1300.0, 800.0)
-    assert view.to_full(u, v) == [1300.0, 800.0]
+    u, v = view.to_view(1300.25, 800.5)
+    assert view.to_full(u, v) == [1300.25, 800.5]
+
+
+def test_view_uses_pixel_centres():
+    # 2x zoom: display px 0 and 1 cover raw px 0, whose centre is at raw 0.0
+    view = View(10, 20, 110, 120, 2.0)
+    assert view.to_full(0, 0) == [9.75, 19.75] and view.to_full(1, 1) == [10.25, 20.25]
+    assert view.to_view(10.0, 20.0) == (0.5, 0.5)
 
 
 def test_full_view_without_holder():
@@ -32,7 +39,9 @@ def test_full_view_without_holder():
 def test_render_png(scene, contrast):
     im, _, res = scene()
     view = make_view(im.shape, res, 500)
-    png = cv2.imdecode(np.frombuffer(base64.b64decode(render(im, view, contrast)), np.uint8),
+    g = contrast_map(im, view, contrast)
+    assert g.shape == (view.y1 - view.y0, view.x1 - view.x0) and g.dtype == np.uint8
+    png = cv2.imdecode(np.frombuffer(base64.b64decode(render(g, view)), np.uint8),
                        cv2.IMREAD_UNCHANGED)
     assert png.shape == view.size[::-1] and png.dtype == np.uint8
 
@@ -41,7 +50,20 @@ def test_render_16bit():
     im = (np.arange(200 * 300).reshape(200, 300) * 4).astype(np.uint16)
     view = make_view(im.shape, Result(), 150)
     for contrast in ('stretch', 'raw'):
-        assert render(im, view, contrast)
+        assert render(contrast_map(im, view, contrast), view)
+
+
+def test_loupe_centres_subpixel_point():
+    # linear ramp: the loupe centre pixel must show the value at the (sub-pixel) point
+    yy, xx = np.mgrid[:100, :120]
+    g = (xx + 0.5 * yy).astype(np.float32)                   # float: no quantisation
+    view = View(20, 10, 140, 110, 1.0)
+    for pt in ([60.0, 40.0], [60.4, 40.0], [75.25, 52.75]):
+        out = loupe(g, view, pt, zoom=8, size=101)
+        assert out.shape == (101, 101)
+        expect = (pt[0] - view.x0) + 0.5 * (pt[1] - view.y0)
+        assert abs(float(out[50, 50]) - expect) < 0.05         # warpAffine: 1/32 px steps
+        assert out[50, 58] > out[50, 50] > out[50, 42]           # +x is right
 
 
 def test_annotation_flow():
@@ -55,6 +77,24 @@ def test_annotation_flow():
     a.click([30.0, 20.0]); a.click([10.0, 30.0]); a.click([10.0, 40.0])
     a.click([99.0, 99.0])                                    # a 6th click is ignored
     assert a.label() == {'dots': [[10.0, 20.0], None, [30.0, 20.0], [10.0, 30.0], [10.0, 40.0]]}
+
+
+def test_annotation_press_drag_nudge():
+    a = Annotation()
+    assert a.press([10.0, 10.0], tol=5) == ('dots', 0)        # empty spot: new dot
+    assert a.press([12.0, 11.0], tol=5) == ('dots', 0)        # near dot 0: grabs it
+    assert len(a.dots) == 1
+    a.move(('dots', 0), (10.123, 9.876))
+    assert a.dots == [[10.12, 9.88]]
+    a.nudge(('dots', 0), 0.25, -1.0)
+    assert a.get(('dots', 0)) == [10.37, 8.88]
+    assert a.press([50.0, 10.0], tol=5) == ('dots', 1)
+    a.missing()
+    a.nudge(('dots', 2), 1, 1)                                # a not-visible dot stays None
+    assert a.dots[2] is None and a.get(('dots', 7)) is None
+    a.dots += [[0.0, 0.0], [1.0, 1.0]]
+    assert a.press([200.0, 200.0], tol=5) is None             # all placed, nothing near
+    assert a.hit([0.5, 0.4], tol=5) == ('dots', 3)            # nearest of two within tol
 
 
 def test_annotation_holder_and_note():

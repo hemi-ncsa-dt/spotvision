@@ -292,10 +292,12 @@ Inputs are expanded like `spotvision`'s: a directory without `raw.png` stands fo
 
 **Per run, either:**
 
-* click the 5 dot centres in template order: **0** corner dot, **1, 2** along the wider-spaced (10 mm) arm, **3, 4** along the closer-spaced (6 mm) arm. A dot you can't see: `x` or right-click. A click within a few px of the centre is enough. Then `Enter`.
+* place the 5 dot centres in template order: **0** corner dot, **1, 2** along the wider-spaced (10 mm) arm, **3, 4** along the closer-spaced (6 mm) arm. A dot you can't see: `x` or right-click. Then `Enter`.
 * or press `n` if no dot is visible to you either; that confirms a refusal is right.
 
-The detector's dots are shown as dashed orange `d0`–`d4` circles for reference; `a` copies them as a starting point (`u` removes dots from the end so they can be re-clicked). Other keys: `u` undo, `c` cycle contrast (stretch / CLAHE / raw, helps on dark or washed-out images), `f` full image, `h` click the 4 plate corners starting at the chamfer corner (only when the yellow holder box is wrong), `t` note, `s` skip, `b` back, `q` quit. `--size` caps the image size on screen.
+**Placing a dot accurately:** press and hold. A magnifier opens on the point with a circle of the nominal dot size and a crosshair; drag until the circle sits on the dot's edge all round, then release. Pressing on a placed dot picks it up again (it moves with the cursor without jumping to it). The arrow keys nudge the selected dot by 0.25 px (Shift: 1 px) with the magnifier shown, and the mouse wheel changes the circle radius to match the dots in front of you (it carries over to the next runs). Positions are stored to 0.01 px in `raw.png` pixel-centre coordinates (the convention the detector uses).
+
+The detector's dots are shown as dashed orange `d0`–`d4` circles for reference; `a` copies them as a starting point (`u` removes dots from the end so they can be re-clicked). Other keys: `u` undo, `c` cycle contrast (stretch / CLAHE / raw, helps on dark or washed-out images), `f` full image, `h` click the 4 plate corners starting at the chamfer corner (only when the yellow holder box is wrong), `t` note, `Esc` close the magnifier, `s` skip, `b` back, `q` quit. `--size` caps the image size on screen.
 
 **`labels.json`** is rewritten after every saved run, one run per line, with coordinates in full-resolution `raw.png` px (x, y):
 
@@ -313,7 +315,7 @@ Optional keys: `holder` (4 corners) and `note`.
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 67 tests, ~10 s
+.venv/bin/python -m pytest -q            # 70 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
@@ -323,7 +325,7 @@ Optional keys: `holder` (4 corners) and `note`.
 | `test_dots.py` | circle refinement accuracy (both polarities), disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
 | `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
 | `test_outputs.py` | COORD key sets for metadata, diagnostics and transform; acquisition whitelist; `write_run`; CLI end-to-end, parallel, no overlay, unreadable input, input expansion |
-| `test_annotate.py` | annotation tool without the GUI: view mapping, rendering, label building, labels file |
+| `test_annotate.py` | annotation tool without the GUI: pixel-centre view mapping, rendering, sub-pixel magnifier, press / drag / nudge, labels file |
 | `test_realdata.py` | regression on captured runs; skipped when the run folders are absent |
 
 **Layout:**
