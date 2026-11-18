@@ -1,6 +1,7 @@
 # whitelist: only code-relevant files at the top level (run folders, results, images stay out)
 /*
 !/.gitignore
+!/.github/
 !/README.md
 !/pyproject.toml
 !/src/

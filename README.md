@@ -1,5 +1,7 @@
 # spotvision
 
+[![tests](https://github.com/hemi-ncsa-dt/spotvision/actions/workflows/tests.yml/badge.svg)](https://github.com/hemi-ncsa-dt/spotvision/actions/workflows/tests.yml)
+
 Detects, in one overhead camera image of a sample station:
 
 1. **the sample holder**: a rigid 120 × 70 mm rectangle, with the chamfered corner that fixes its orientation;
