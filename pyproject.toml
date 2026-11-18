@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotvision"
+dynamic = ["version"]
+description = "Sample-holder pose, sample window and fiducial-dot detection for overhead station images"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "opencv-python-headless>=4.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+spotvision = "spotvision.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "spotvision.version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["realdata: needs the captured run folders next to the repository"]

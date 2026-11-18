@@ -1,0 +1,12 @@
+# whitelist: only code-relevant files at the top level (run folders, results, images stay out)
+/*
+!/.gitignore
+!/README.md
+!/pyproject.toml
+!/src/
+!/tests/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
