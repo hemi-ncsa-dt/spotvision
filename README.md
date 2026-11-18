@@ -51,7 +51,7 @@ spotvision -o results frame_0001.png --overlay-scale 0     # no overlay
 | `--no-detection` | leave the full `Result` (`detection`) out of `metadata.json` |
 | `-q/--quiet` | print only the final summary |
 
-One line is printed per run (`name  time  confidence  dots  rms  reasons`), then a summary such as `summary: clean 117, degraded 18, refused 81`. The exit code is 1 if any input could not be read. `python -m spotvision` is equivalent.
+One line is printed per run (`name  time  confidence  dots  rms  reasons`), then a summary such as `summary: clean 125, degraded 18, refused 73`. The exit code is 1 if any input could not be read. `python -m spotvision` is equivalent.
 
 ### Python
 
@@ -108,7 +108,7 @@ image (x right, y down), holder upright:
 
 ```json
 {
-  "algorithm_version": "spotvision-0.3.0",
+  "algorithm_version": "spotvision-0.3.1",
   "matrix": [[0.99680, 0.01313], [-0.01313, 0.99680]],
   "rms_error_mm": 0.0036,
   "translation": [2.502, 3.073]
@@ -169,10 +169,10 @@ The window is machined into the holder, so it is **placed** from the holder pose
    * scale within 12 % of the holder px/mm;
    * rotation within ±20° of the holder axes;
    * all five dots inside the window, allowing up to ¼ radius under the lip;
-   * the corner dot within ±2 mm of (3.2, 3.2) mm from the window's top-left corner (measured on 117 clean runs: 2.0–4.3 mm).
+   * the corner dot within ±2 mm of (3.2, 3.2) mm from the window's top-left corner (measured on 125 clean runs: 1.75–4.3 mm).
 
    Hypotheses are scored mainly by the number of matched dots. The top 10 per polarity are kept, with non-maximum suppression.
-3. **Verification:** each predicted dot is refined by a sub-pixel circle fit (48 radial edge rays, trimmed Kasa fit, radius within 0.65–1.5 × nominal). It is then scored by its **disc NCC**: the normalised cross-correlation of the patch with an ideal disc, after removing a planar background estimated from a surrounding ring. This score does not depend on contrast or illumination gradients. On this data, random texture scores ≤ 0.45 (95th percentile) and real dots score 0.7–0.97.
+3. **Verification:** each predicted dot is refined by a sub-pixel circle fit (48 radial edge rays, trimmed Kasa fit, radius within 0.65–1.5 × nominal). It is then scored by its **disc NCC**: the normalised cross-correlation of the patch with an ideal disc, after removing a planar background estimated from a surrounding ring (1.2–1.7 × the radius). This score does not depend on contrast or illumination gradients. Only sample surface is used: pixels within 0.8 mm of the window edge are masked out, because the dark gap and bright bevel there would otherwise corrupt the background of dots that sit close to the edge. On this data, random texture scores ≤ 0.45 (95th percentile) and real dots score 0.7–0.97.
    * A dot is **strong** if NCC ≥ 0.7, and **weak** if NCC ≥ 0.45 with ≥ 60 % of its edge rays on the circle.
    * A hypothesis needs **≥ 1 strong dot**, and either ≥ 2 strong dots or ≥ 4 dots in total. Weak dots therefore count only through geometric consensus.
    * Of the hypotheses that qualify, the one with the highest summed NCC wins.
@@ -226,6 +226,7 @@ Every nominal and threshold lives in `src/spotvision/constants.py`, with a comme
 | `CORNER_DOT_IN_WINDOW_MM`, `CORNER_DOT_TOL_MM` | (3.2, 3.2), ±2 mm | where the corner dot may be |
 | `MAX_SAMPLE_ROT_DEG` | 20° | sample rotation prior |
 | `DOT_STRONG_NCC`, `DOT_WEAK_NCC` | 0.7, 0.45 | dot evidence; lowering these trades false refusals for false poses |
+| `DOT_NCC_WINDOW_INSET_MM` | 0.8 mm | window-edge band excluded from the dot NCC |
 | `MIN_STRONG`, `MIN_TOTAL_IF_WEAK` | 2, 4 | consensus rule |
 | `SPACING_TOL` | 0 / 12 % / 8 % | allowed along-arm deviation per dot |
 | `CLEAN_RMS_PX`, `CLEAN_PERP_DEG`, `MAX_RMS_PX` | 1.0 px, 0.5°, 3.0 px | clean vs. degraded vs. refused |
@@ -249,26 +250,26 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 
 | | count |
 |---|---|
-| clean | 117 |
+| clean | 125 |
 | degraded | 18 |
-| refused | 81 |
+| refused | 73 |
 
 * The holder was found in 213 of 216 runs.
 * Speed is about 0.4 s per image on one core; all 216 take about 21 s with `-j 8`.
-* All 135 poses were inspected on contact sheets. Every clean pose looked correct. No hand-labelled ground truth exists yet.
+* All 143 poses were inspected on contact sheets. Every clean pose looked correct. No hand-labelled ground truth exists yet.
 * Most refusals have no visible dots: dark JHBMAI samples, round JHACRA samples, rock-textured JHAMAL00020 samples, and dots washed out by glare.
 
 **Comparison with the old COORD pipeline.** This is a cross-check, not ground truth.
 
-* **Both clean (56 runs):** they agree within 0.11 mm, 0.14° and 0.003 in scale.
-* **Better here, clean (15 runs):**
-  * 14 runs where COORD gave no pose, mostly dark images where it lost the holder;
+* **Both clean (61 runs):** they agree within 0.11 mm, 0.16° and 0.003 in scale.
+* **Better here, clean (17 runs):**
+  * 16 runs where COORD gave no pose, mostly dark images where it lost the holder;
   * 1 run where COORD's pose was off by 45 mm.
 * **Old pose wrong, correct here but flagged:** 2 runs (COORD reported 142° and 160° rotations).
-* **Old pose wrong, refused here:** 40 runs of COORD "degraded" poses on rock texture, dotless or glare images.
+* **Old pose wrong, refused here:** 39 runs of COORD "degraded" poses on rock texture, dotless or glare images.
 * **Same pose, clean here instead of degraded:** 46 runs. These are the uneven-middle-dot samples (COORD residual ≈ 3.8 px).
-* **Refused here, but COORD's pose looks right:** 2 runs (APLMEX00001-003, TEST_0000_0_1_2026-11-03_15-17-16), both with glare.
-* **Degraded here, but the pose is correct:** 5 runs where a visible dot scores just under NCC 0.7.
+* **Refused here, but COORD's pose looks right:** 1 run (TEST_0000_0_1_2026-11-03_15-17-16), with glare.
+* **Degraded here, but the pose is correct:** runs where a visible dot is missed or scores just under NCC 0.7, mostly under glare (e.g. APLMAA00001-008, TEST20).
 
 ## Limitations
 
@@ -282,14 +283,14 @@ These hold across holder rotations (including 180°), sample rotations up to 8°
 ## Development
 
 ```bash
-.venv/bin/python -m pytest -q            # 55 tests, ~10 s
+.venv/bin/python -m pytest -q            # 57 tests, ~10 s
 .venv/bin/python -m pytest -m realdata   # only the captured-run regressions
 ```
 
 | test file | covers |
 |---|---|
 | `test_geometry.py` | similarity fit, robust line, intersection, quad containment, frame conversions, sub-pixel peak |
-| `test_dots.py` | circle refinement accuracy (both polarities), disc NCC (polarity, gradients, noise), candidates, L-frame fit |
+| `test_dots.py` | circle refinement accuracy (both polarities), disc NCC (polarity, gradients, noise, window-edge masking), candidates, L-frame fit |
 | `test_pipeline.py` | synthetic end-to-end accuracy; rotations; holder frame following the chamfer; dark dots; uneven middle dot; missing dot → degraded; no dots, dots away from the corner, mirrored pattern, no holder → refused; distractor grid; colour and 16-bit input |
 | `test_outputs.py` | COORD key sets for metadata, diagnostics and transform; acquisition whitelist; `write_run`; CLI end-to-end, parallel, no overlay, unreadable input, input expansion |
 | `test_realdata.py` | regression on captured runs; skipped when the run folders are absent |

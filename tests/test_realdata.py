@@ -30,6 +30,8 @@ def angle(res):
     ('JHAMAA00008-005_6aaace8e3415e897e0786536_0_2088_2026-09-24_18-53-15', None, None),
     # very dark exposure
     ('TEST00_000000000000000000000000_0_2183_2026-10-15_12-55-08', None, None),
+    # dots ~2.4 mm from the window edges: NCC must ignore the edge gap and bevel
+    ('APLMAA00001-002_6ac8ed51b13375b643372e44_0_2239_2026-11-02_16-02-01', None, None),
 ])
 def test_clean_runs(run, translation, deg):
     res = analyze(load(run))
@@ -48,10 +50,16 @@ def test_uneven_middle_dot_measured():
 @pytest.mark.parametrize('run', [
     'JHBMAI00005-003_6aaafd0eade031549e2d4688_0_2076_2026-09-17_19-01-00',    # no visible dots
     'JHAMAL00020-S8R0C1_6a428ee4529e4df6c516a1c8_0_2075_2026-09-17_18-47-48',  # rock texture
-    'APLMAA00001-008_6ac8ed6b6ed7698c1288dc37_0_2239_2026-11-02_16-05-02',     # glare, corner prior
 ])
 def test_refused_runs(run):
     res = analyze(load(run))
     assert res.confidence == 'refused'
     assert res.transform is None
     assert res.holder_corners is not None
+
+
+def test_glare_run_degraded_with_four_dots():
+    # camera reflection over the dots; dot 1 is missed, the other four are right
+    res = analyze(load('APLMAA00001-008_6ac8ed6b6ed7698c1288dc37_0_2239_2026-11-02_16-05-02'))
+    assert res.confidence == 'degraded'
+    assert [d is not None for d in res.dots_px] == [True, False, True, True, True]

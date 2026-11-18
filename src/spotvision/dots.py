@@ -26,7 +26,7 @@ def dot_candidates(img, win, R, max_n=C.DOT_MAX_CANDIDATES):
     for pol, resp in (('bright', np.max([-L for L in logs], 0)),
                       ('dark', np.max(logs, 0))):
         mx = ndi.maximum_filter(resp, size=int(R))
-        pk = np.argwhere((resp == mx) & (resp > 0.02))
+        pk = np.argwhere((resp == mx) & (resp > C.DOT_LOG_MIN_RESPONSE))
         v = resp[pk[:, 0], pk[:, 1]]
         idx = np.argsort(-v)[:max_n]
         out[pol] = (pk[idx][:, ::-1] + [x0, y0]).astype(np.float64), v[idx]
@@ -50,7 +50,7 @@ def fit_template(cands, scores, tmpl, ppm, R, win, exp_ang, corner_ok, scale_tol
     if n < 2:
         return []
     hyps = []
-    tol = 0.5 * R
+    tol = C.DOT_MATCH_TOL_R * R
     I, J = np.where(~np.eye(n, dtype=bool))
     dc = cands[J] - cands[I]
     for a in range(len(tmpl)):
@@ -68,12 +68,13 @@ def fit_template(cands, scores, tmpl, ppm, R, win, exp_ang, corner_ok, scale_tol
             Rm = np.stack([np.stack([z.real, -z.imag], -1), np.stack([z.imag, z.real], -1)], -2)
             t = cands[I[ok]] - Rm @ tmpl[a]
             proj = np.einsum('kij,pj->kpi', Rm, tmpl) + t[:, None, :]     # (k, 5, 2)
-            valid = inside_quad(win, proj, -0.25 * R).all(1)  # dots may hide partly under the lip
+            valid = inside_quad(win, proj, -C.DOT_WINDOW_OVERHANG_R * R).all(1)
             valid &= corner_ok(t)                              # tmpl[0] = corner dot = origin
             d = np.linalg.norm(proj[:, :, None, :] - cands[None, None], axis=-1)  # (k, 5, n)
             nn = d.argmin(-1); dmin = d.min(-1)
             inl = dmin < tol
-            sc = (inl.sum(1) + 0.5 * (inl * scores[nn] * (1 - dmin / tol)).sum(1)) * valid
+            strength = (inl * scores[nn] * (1 - dmin / tol)).sum(1)
+            sc = (inl.sum(1) + C.DOT_MATCH_STRENGTH_WEIGHT * strength) * valid
             for k in np.argsort(-sc)[:C.N_HYPOTHESES]:
                 if sc[k] > 0:
                     hyps.append((sc[k], Rm[k], t[k], np.where(inl[k], nn[k], -1)))
@@ -95,16 +96,17 @@ def refine_dot(img, c, R, polarity, n_rays=48):
     ang = np.linspace(0, 2 * np.pi, n_rays, endpoint=False)
     dirs = np.stack([np.cos(ang), np.sin(ang)], 1)
     c = np.asarray(c, float)
+    step = 0.5                                       # px along each ray
     for _ in range(2):
-        rs = np.arange(0.4 * R, 1.7 * R, 0.5)
+        rs = np.arange(C.DOT_RAY_RANGE_R[0] * R, C.DOT_RAY_RANGE_R[1] * R, step)
         xy = c[None, None] + rs[None, :, None] * dirs[:, None]
         prof = ndi.map_coordinates(img, [xy[..., 1], xy[..., 0]], order=1, mode='nearest')
         g = np.gradient(prof, axis=1)
         g = {'bright': -g, 'dark': g}.get(polarity, np.abs(g))
         j = np.clip(g.argmax(1), 1, len(rs) - 2)
         sub, peak = subpixel_peak(g, j)
-        rr = rs[j] + 0.5 * sub
-        good = peak > 0.25 * np.median(peak) + 1e-6
+        rr = rs[j] + step * sub
+        good = peak > C.DOT_EDGE_MIN_PEAK * np.median(peak) + 1e-6
         P = c + rr[:, None] * dirs
         keep = good.copy()
         for _ in range(3):
@@ -115,26 +117,37 @@ def refine_dot(img, c, R, polarity, n_rays=48):
             cx, cy, k0 = np.linalg.lstsq(A, bvec, rcond=None)[0]
             rad = np.sqrt(k0 + cx ** 2 + cy ** 2)
             resid = np.abs(np.linalg.norm(P - [cx, cy], axis=1) - rad)
-            keep = good & (resid < max(1.5, 2.5 * np.median(resid[keep])))
+            trim = max(C.DOT_FIT_TRIM_PX, C.DOT_FIT_TRIM_FACTOR * np.median(resid[keep]))
+            keep = good & (resid < trim)
         c = np.array([cx, cy])
-    if keep.mean() < 0.5 or not C.DOT_RADIUS_RANGE[0] < rad / R < C.DOT_RADIUS_RANGE[1]:
+    lo, hi = C.DOT_RADIUS_RANGE
+    if keep.mean() < C.DOT_MIN_EDGE_FRAC or not lo < rad / R < hi:
         return None
     return c, rad, keep.mean()
 
 
-def dot_ncc(img, c, rad, polarity):
+def dot_ncc(img, c, rad, polarity, win=None, inset=0.0):
     """Contrast-independent disc evidence: NCC between the patch (planar background,
     estimated from a ring around the dot, removed) and an ideal disc of radius rad.
-    Signed: > 0 means the expected polarity ('mixed' -> absolute value)."""
-    r = int(np.ceil(1.7 * rad))
+    Signed: > 0 means the expected polarity ('mixed' -> absolute value).
+
+    With win, only pixels at least inset px inside that quad are used: dots near the
+    window edge would otherwise fit their background to the dark gap and bright bevel."""
+    r_in, r_out = C.DOT_NCC_RING_R[0] * rad, C.DOT_NCC_RING_R[1] * rad
+    r = int(np.ceil(r_out))
     x0, y0 = int(round(c[0])) - r, int(round(c[1])) - r
     if x0 < 0 or y0 < 0 or x0 + 2 * r + 1 > img.shape[1] or y0 + 2 * r + 1 > img.shape[0]:
         return 0.0
     patch = img[y0:y0 + 2 * r + 1, x0:x0 + 2 * r + 1].astype(np.float64)
     yy, xx = np.mgrid[y0:y0 + 2 * r + 1, x0:x0 + 2 * r + 1]
     dist = np.hypot(xx - c[0], yy - c[1])
-    m = dist < 1.7 * rad
-    ring = m & (dist > 1.2 * rad)
+    m = dist < r_out
+    if win is not None:
+        m &= inside_quad(win, np.stack([xx, yy], -1).astype(np.float64), inset)
+    ring = m & (dist > r_in)
+    full_ring_area = np.pi * (r_out ** 2 - r_in ** 2)
+    if ring.sum() < C.DOT_NCC_MIN_RING_FRAC * full_ring_area:
+        return 0.0                                                # too little background
     A = np.c_[xx[ring], yy[ring], np.ones(ring.sum())]
     coef = np.linalg.lstsq(A, patch[ring], rcond=None)[0]
     v = (patch - (coef[0] * xx + coef[1] * yy + coef[2]))[m]
@@ -177,8 +190,8 @@ def _determined(found):
     return nx >= 1 and ny >= 1 and nx + ny >= 4
 
 
-def _accept(img, r, R, pol, ncc, found, i):
-    ncc[i] = dot_ncc(img, r[0], r[1], pol)
+def _accept(img, r, R, pol, ncc, found, i, win):
+    ncc[i] = dot_ncc(img, r[0], r[1], pol, win, C.DOT_NCC_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R)
     if ncc[i] >= C.DOT_WEAK_NCC and r[2] >= C.DOT_WEAK_FRAC:
         found[i] = r[0]
 
@@ -194,8 +207,8 @@ def _best_hypothesis(img, cands, ppm, R, win, exp_ang, corner_ok):
             found, ncc = [None] * 5, [None] * 5
             for i, p in enumerate(pred):
                 r = refine_dot(img, pts[match[i]] if match[i] >= 0 else p, R, pol)
-                if r is not None and np.linalg.norm(r[0] - p) <= 0.8 * R:
-                    _accept(img, r, R, pol, ncc, found, i)
+                if r is not None and np.linalg.norm(r[0] - p) <= C.DOT_MAX_SHIFT_R * R:
+                    _accept(img, r, R, pol, ncc, found, i, win)
             acc = [v for v, f in zip(ncc, found) if f is not None]
             n_strong = sum(v >= C.DOT_STRONG_NCC for v in acc)
             if n_strong < 1 or (n_strong < C.MIN_STRONG and len(acc) < C.MIN_TOTAL_IF_WEAK):
@@ -249,8 +262,8 @@ def find_dots(img, win, holder, res):
         if found[i] is None:
             p = o + s_ppm * (C.DOT_TEMPLATE[i, 0] * ex + C.DOT_TEMPLATE[i, 1] * ey)
             r = refine_dot(img, p, R, pol)
-            if r is not None and np.linalg.norm(r[0] - p) <= 0.4 * R:
-                _accept(img, r, R, pol, ncc, found, i)
+            if r is not None and np.linalg.norm(r[0] - p) <= C.DOT_GUIDED_MAX_SHIFT_R * R:
+                _accept(img, r, R, pol, ncc, found, i, win)
     res.dots_ncc = [None if v is None else round(v, 2) for v in ncc]
 
     # prune: dots off nominal spacing, then dots far off their arm line

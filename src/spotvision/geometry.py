@@ -19,8 +19,9 @@ def line_intersect(l1, l2):
     return p + t[0] * d
 
 
-def robust_line(pts, iters=3, tol=1.5):
-    """Huber line fit with iterative outlier trimming. Returns ((point, dir), inlier_frac)."""
+def robust_line(pts, iters=3, tol=1.5, trim=2.5):
+    """Huber line fit with iterative outlier trimming (inliers: residual < max(tol,
+    trim * median residual)). Returns ((point, dir), inlier_frac)."""
     pts = np.asarray(pts, np.float32)
     keep = np.ones(len(pts), bool)
     for _ in range(iters):
@@ -28,7 +29,7 @@ def robust_line(pts, iters=3, tol=1.5):
         d = np.array([vx, vy]); p = np.array([x0, y0])
         n = np.array([-vy, vx])
         res = np.abs((pts - p) @ n)
-        keep = res < max(tol, 2.5 * np.median(res[keep]))
+        keep = res < max(tol, trim * np.median(res[keep]))
     return (p, d), keep.mean()
 
 

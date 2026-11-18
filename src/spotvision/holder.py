@@ -19,11 +19,11 @@ def find_holder_coarse(im, s=C.HOLDER_COARSE_DOWNSAMPLE):
     """Plate as the bright component best matching the 120x70 rectangle, over a threshold
     sweep on a downsampled image. Returns its minAreaRect corners in full-res px or None."""
     sm = cv2.resize(im, None, fx=1 / s, fy=1 / s, interpolation=cv2.INTER_AREA)
-    sm = cv2.GaussianBlur(normalize(sm), (0, 0), 1.5)
+    sm = cv2.GaussianBlur(normalize(sm), (0, 0), C.HOLDER_COARSE_BLUR_PX)
     H, W = sm.shape
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     best = None
-    for t in np.linspace(0.05, 0.9, 35):
+    for t in C.HOLDER_THRESHOLDS:
         m = cv2.morphologyEx((sm > t).astype(np.uint8), cv2.MORPH_OPEN, k)
         cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         for c in cnts:
@@ -36,7 +36,7 @@ def find_holder_coarse(im, s=C.HOLDER_COARSE_DOWNSAMPLE):
             _, (rw, rh), _ = cv2.minAreaRect(c)
             fill = area / (rw * rh)
             aspect = max(rw, rh) / min(rw, rh)
-            score = fill - 3 * abs(aspect - C.HOLDER_ASPECT) / C.HOLDER_ASPECT
+            score = fill - C.HOLDER_ASPECT_WEIGHT * abs(aspect - C.HOLDER_ASPECT) / C.HOLDER_ASPECT
             if fill > C.HOLDER_MIN_FILL and abs(aspect / C.HOLDER_ASPECT - 1) < C.HOLDER_ASPECT_TOL:
                 if best is None or score > best[0]:
                     best = (score, c)
@@ -113,7 +113,7 @@ def find_holder(im, res):
     if box is None:
         res.reasons.append('holder: no plate-shaped component')
         return None
-    img = cv2.GaussianBlur(normalize(im), (0, 0), 2)
+    img = cv2.GaussianBlur(normalize(im), (0, 0), C.HOLDER_REFINE_BLUR_PX)
     corners, _ = refine_rect(img, box, search=C.HOLDER_EDGE_SEARCH_PX)
     if corners is None:
         res.reasons.append('holder: edge refinement failed')

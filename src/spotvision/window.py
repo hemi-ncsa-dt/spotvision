@@ -13,8 +13,10 @@ def find_window(holder, res):
     X0, Y0, S = C.WINDOW_X0, C.WINDOW_Y0, C.WINDOW_SIZE
     win = holder_to_px(holder.H, [[X0, Y0], [X0 + S, Y0], [X0 + S, Y0 + S], [X0, Y0 + S]])
     res.window_corners = win.tolist()
-    meas, _ = refine_rect(holder.img, win.astype(np.float64), search=1.5 * holder.ppm,
-                          t_range=(0.12, 0.88), mode='valley', max_tilt_deg=1.0)
+    meas, _ = refine_rect(holder.img, win.astype(np.float64),
+                          search=C.WINDOW_GROOVE_SEARCH_MM * holder.ppm,
+                          t_range=C.WINDOW_GROOVE_SPAN, mode='valley',
+                          max_tilt_deg=C.WINDOW_GROOVE_MAX_TILT_DEG)
     if meas is not None:
         res.window_groove_offset_mm = float(
             np.median(np.linalg.norm(meas - win, axis=1)) / holder.ppm)

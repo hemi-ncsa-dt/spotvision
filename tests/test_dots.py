@@ -103,3 +103,17 @@ def test_fit_l_frame_with_missing_corner_and_residual():
     o_fit, _, _, e = fit_l_frame(found, ex, ey, o)
     assert np.linalg.norm(o_fit - o) < 2.0
     assert np.abs(e).max() > 0.3
+
+
+def test_dot_ncc_ignores_window_edge():
+    # dark gap + bright bevel 2.2 mm from a dot centre (APLMAA00001-002): the background
+    # ring crosses them unless the NCC is restricted to the sample surface
+    c = (150.0, 150.0)
+    img = disc_image([c], level=60, bg=110, shape=(300, 300), noise=1.0)
+    edge = c[0] - 2.2 / C.DOT_RADIUS_MM * R
+    img[:, :int(edge) + 6] = 25 / 255
+    img[:, int(edge) + 6:int(edge) + 10] = 160 / 255
+    win = np.array([[edge, 0], [299, 0], [299, 299], [edge, 299]])
+    inset = C.DOT_NCC_WINDOW_INSET_MM / C.DOT_RADIUS_MM * R
+    assert dot_ncc(img, c, R, 'dark') < C.DOT_STRONG_NCC
+    assert dot_ncc(img, c, R, 'dark', win, inset) > 0.9
