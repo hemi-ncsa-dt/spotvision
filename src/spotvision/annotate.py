@@ -253,22 +253,44 @@ class App:
         fit = min(sh - 100, sw - panel_w - 60)                  # title bar, panels, padding
         self.max_px = max(400, min(size or fit, fit))
         self.loupe_px = max(LOUPE_MIN_PX, int(LOUPE_FRAC * self.max_px))
-        self.canvas.bind('<ButtonPress-1>', self.on_press)
-        self.canvas.bind('<B1-Motion>', self.on_drag)
-        self.canvas.bind('<ButtonRelease-1>', self.on_release)
-        self.canvas.bind('<Button-3>', lambda e: self.act(self.ann.missing))
-        self.canvas.bind('<Button-4>', lambda e: self.resize_circle(1))     # X11 wheel
-        self.canvas.bind('<Button-5>', lambda e: self.resize_circle(-1))
-        self.canvas.bind('<MouseWheel>', lambda e: self.resize_circle(1 if e.delta > 0 else -1))
-        self.root.bind('<Key>', self.on_key)
+        for widget, event, handler in (
+                (self.canvas, '<ButtonPress-1>', self.on_press),
+                (self.canvas, '<B1-Motion>', self.on_drag),
+                (self.canvas, '<ButtonRelease-1>', self.on_release),
+                (self.canvas, '<Button-3>', lambda e: self.act(self.ann.missing)),
+                (self.canvas, '<Button-4>', lambda e: self.resize_circle(1)),    # X11 wheel
+                (self.canvas, '<Button-5>', lambda e: self.resize_circle(-1)),
+                (self.canvas, '<MouseWheel>',
+                 lambda e: self.resize_circle(1 if e.delta > 0 else -1)),
+                (self.root, '<Key>', self.on_key)):
+            widget.bind(event, self.unless_busy(handler))
         self.root.protocol('WM_DELETE_WINDOW', self.root.destroy)
         self.root.focus_force()                                  # keys work without a click
-        self.history, self.i, self.message = [], -1, ''
+        self.history, self.i, self.message, self.busy = [], -1, '', False
         self.r_adjust = 0.0               # wheel change to the circle radius, kept across runs
         self.next_run()
 
+    def unless_busy(self, handler):
+        """Input is dropped while a run loads: it was meant for the previous run."""
+        return lambda e: None if self.busy else handler(e)
+
+    def loading(self, fn):
+        """Run fn with input disabled, then discard the input queued meanwhile."""
+        self.busy = True
+        try:
+            fn()
+        finally:
+            try:
+                self.root.update()                       # handlers see busy and drop it
+            except self.tk.TclError:                     # window closed after the last run
+                pass
+            self.busy = False
+
     # ---- run navigation -----------------------------------------------------------
     def next_run(self):
+        self.loading(self._next_run)
+
+    def _next_run(self):
         while True:
             self.i += 1
             if self.i >= len(self.runs):
@@ -284,12 +306,12 @@ class App:
             return self.draw()
         self.history.pop()
         self.i = self.history[-1]
-        self.load(self.runs[self.i], force=True)
+        self.loading(lambda: self.load(self.runs[self.i], force=True))
 
     def load(self, path, force=False):
         image, self.name, _ = resolve_input(path)
         self.root.title(f'spotvision-annotate  [{self.i + 1}/{len(self.runs)}]  {self.name}')
-        self.root.update()
+        self.root.update_idletasks()                     # redraw only; never handle input here
         im = cv2.imread(image, cv2.IMREAD_UNCHANGED)
         if im is None:
             print(f'{self.name}: cannot read {image}, skipped', file=sys.stderr)
